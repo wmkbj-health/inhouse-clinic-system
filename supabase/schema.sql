@@ -347,7 +347,7 @@ join patients p on p.id = v.patient_id, jsonb_array_elements(v.diagnosa) d
 group by 1, 2, 3, 4, 5;
 
 create view v_top_drugs as
-select vs.company_id, date_trunc('month', v.tanggal)::date as bulan, dr.nama, sum(vs.qty) as jumlah
+select v.company_id, date_trunc('month', v.tanggal)::date as bulan, dr.nama, sum(vs.qty) as jumlah
 from visit_obat vs
 join visits v on v.id = vs.visit_id
 join drugs dr on dr.id = vs.drug_id
