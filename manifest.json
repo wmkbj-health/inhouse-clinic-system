@@ -1,0 +1,15 @@
+{
+  "name": "Inhouse Clinic System",
+  "short_name": "ICS Klinik",
+  "description": "Sistem manajemen klinik inhouse: pendaftaran pasien, rekam medis SOAP, ICD-10, apotek, rujukan, dan surat keterangan sakit.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0f1420",
+  "theme_color": "#1565c0",
+  "icons": [
+    { "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
