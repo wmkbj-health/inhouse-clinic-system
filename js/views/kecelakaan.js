@@ -23,6 +23,8 @@ export async function renderKecelakaan(root) {
           <option value="MA">Medical Aid (MA)</option>
           <option value="LTI">Lost Time Injury (LTI)</option>
         </select>
+        <select id="monthFilter" style="max-width:160px"><option value="">Semua Bulan</option></select>
+        <select id="yearFilter" style="max-width:120px"><option value="">Semua Tahun</option></select>
       </div>
       <div class="table-wrap"><table>
         <thead><tr><th>Tgl</th><th>Nama Pasien</th><th>Departemen</th><th>Tingkat</th><th>Diagnosa</th><th>Terkena</th><th>Kronologi</th></tr></thead>
@@ -41,6 +43,13 @@ export async function renderKecelakaan(root) {
 
   root.querySelector('#count').textContent = `(${cases.length})`;
   const rows = root.querySelector('#rows');
+
+  const MONTH_NAMES = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+  const monthSel = root.querySelector('#monthFilter');
+  monthSel.insertAdjacentHTML('beforeend', MONTH_NAMES.map((m, i) => `<option value="${i}">${m}</option>`).join(''));
+  const years = [...new Set(cases.map(v => new Date(v.kecelakaan_kerja?.tanggalKejadian || v.tanggal).getFullYear()))].sort((a, b) => b - a);
+  const yearSel = root.querySelector('#yearFilter');
+  yearSel.insertAdjacentHTML('beforeend', years.map(y => `<option value="${y}">${y}</option>`).join(''));
 
   function draw(list) {
     if (!list.length) { rows.innerHTML = `<tr><td colspan="7" class="empty">Belum ada kasus kecelakaan kerja tercatat.</td></tr>`; return; }
@@ -63,12 +72,19 @@ export async function renderKecelakaan(root) {
   function applyFilters() {
     const q = root.querySelector('#search').value.trim().toLowerCase();
     const tingkat = root.querySelector('#tingkatFilter').value;
+    const month = monthSel.value;
+    const year = yearSel.value;
     draw(cases.filter(v => {
       if (q && !(v.patients?.nama || '').toLowerCase().includes(q)) return false;
       if (tingkat && v.kecelakaan_kerja?.tingkat !== tingkat) return false;
+      const d = new Date(v.kecelakaan_kerja?.tanggalKejadian || v.tanggal);
+      if (month !== '' && d.getMonth() !== Number(month)) return false;
+      if (year !== '' && d.getFullYear() !== Number(year)) return false;
       return true;
     }));
   }
   root.querySelector('#search').addEventListener('input', debounce(applyFilters, 200));
   root.querySelector('#tingkatFilter').addEventListener('change', applyFilters);
+  monthSel.addEventListener('change', applyFilters);
+  yearSel.addEventListener('change', applyFilters);
 }

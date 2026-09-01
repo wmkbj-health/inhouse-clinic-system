@@ -24,6 +24,22 @@ export function setSelectedCompanyId(id) {
 }
 export function isAllCompanies() { return selectedCompanyId === 'all'; }
 
+export const COMPANY_ORDER = ['WSL', 'MTI', 'KMF', 'BIOS', 'JLA'];
+
+export function companyLogoUrl(codeOrCompany) {
+  const code = (typeof codeOrCompany === 'string' ? codeOrCompany : codeOrCompany?.code || '').toLowerCase();
+  if (!code) return 'assets/icon.svg';
+  return `assets/logos/${code}.png`;
+}
+
+export function sortByCompanyOrder(list, keyFn = c => c.code) {
+  return list.slice().sort((a, b) => COMPANY_ORDER.indexOf(keyFn(a)) - COMPANY_ORDER.indexOf(keyFn(b)));
+}
+
+let pendingApotekFilter = null;
+export function setPendingApotekFilter(type) { pendingApotekFilter = type; }
+export function consumePendingApotekFilter() { const v = pendingApotekFilter; pendingApotekFilter = null; return v; }
+
 export function calcAge(tglLahir) {
   if (!tglLahir) return null;
   const dob = new Date(tglLahir + 'T00:00:00');

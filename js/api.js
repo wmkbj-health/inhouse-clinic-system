@@ -2,6 +2,7 @@ import { supabase } from './supabaseClient.js';
 import { setCompanies, setDiseaseCategories, setDiseaseCodes, setDrugCategories, getSelectedCompanyId, isAllCompanies } from './state.js';
 import { getProfile } from './auth.js';
 import { todayStr } from './util.js';
+import { evaluateVitals } from './clinical.js';
 
 function unwrap({ data, error }) {
   if (error) throw error;
@@ -67,6 +68,27 @@ export async function getPatient(id) {
   return unwrap(await supabase.from('patients').select('*, companies(code, name)').eq('id', id).single());
 }
 
+export async function updatePatient(id, payload) {
+  const row = await unwrap(await supabase.from('patients').update(payload).eq('id', id).select().single());
+  logActivity(row.company_id, 'update_patient', 'patients', id, { nama: row.nama });
+  return row;
+}
+
+export async function deletePatient(id) {
+  const { error } = await supabase.from('patients').delete().eq('id', id);
+  if (error) {
+    if (error.code === '23503') throw new Error('Pasien ini tidak dapat dihapus karena sudah memiliki riwayat kunjungan/antrian/rujukan. Data medis tidak boleh dihapus demi keamanan rekam medis.');
+    throw error;
+  }
+  logActivity(null, 'delete_patient', 'patients', id, {});
+}
+
+export async function queuePositionToday(companyId, queueId) {
+  const list = await unwrap(await supabase.from('queue').select('id').eq('company_id', companyId).eq('tanggal', todayStr()).order('created_at'));
+  const idx = list.findIndex(q => q.id === queueId);
+  return idx >= 0 ? idx + 1 : list.length;
+}
+
 // ---------------- Queue ----------------
 export async function listQueueToday() {
   let q = supabase.from('queue').select('*, patients(nama, no_rm, jenis_kelamin, tgl_lahir)').eq('tanggal', todayStr()).order('created_at');
@@ -127,12 +149,43 @@ export async function listDrugsWithStock() {
   });
 }
 
+// Aggregates stock_transactions in [fromDate, toDate] per drug. Used to show
+// "Penerimaan", "Pemakaian", and "Rata-rata/hari" for a chosen bulan/tahun.
+// Note: qty_sisa (current stock) is always the live figure — there is no
+// historical daily snapshot table, so "Stok Awal" for a period is derived as
+// current stock minus net movement since the period started, which is exact
+// when the period includes today and an approximation for fully past months.
+export async function drugPeriodStats(fromDate, toDate) {
+  const sel = getSelectedCompanyId();
+  let q = supabase.from('stock_transactions').select('drug_id, tipe, qty, tanggal').gte('tanggal', fromDate).lte('tanggal', toDate);
+  if (sel !== 'all') q = q.eq('company_id', sel);
+  const rows = unwrap(await q);
+  const stats = {};
+  for (const r of rows) {
+    if (!stats[r.drug_id]) stats[r.drug_id] = { penerimaan: 0, pemakaian: 0 };
+    const qty = Number(r.qty);
+    if (r.tipe === 'masuk') stats[r.drug_id].penerimaan += qty;
+    else if (r.tipe === 'keluar') stats[r.drug_id].pemakaian += qty;
+    else if (qty < 0) stats[r.drug_id].pemakaian += Math.abs(qty);
+    else stats[r.drug_id].penerimaan += qty;
+  }
+  return stats;
+}
+
 export async function createDrug(payload) {
   return unwrap(await supabase.from('drugs').insert(payload).select().single());
 }
 
 export async function updateDrug(id, payload) {
   return unwrap(await supabase.from('drugs').update(payload).eq('id', id));
+}
+
+export async function deleteDrug(id) {
+  const { error } = await supabase.from('drugs').delete().eq('id', id);
+  if (error) {
+    if (error.code === '23503') throw new Error('Item ini tidak dapat dihapus karena sudah memiliki riwayat batch/transaksi/resep. Nonaktifkan dengan mengosongkan stok, atau ganti namanya.');
+    throw error;
+  }
 }
 
 export async function receiveBatch(companyId, drugId, payload) {
@@ -242,7 +295,7 @@ export async function nextNomorSurat(companyId, prefix) {
 }
 
 export async function listSickNotes() {
-  let q = supabase.from('sick_notes').select('*, patients(nama, no_rm)').order('tanggal', { ascending: false });
+  let q = supabase.from('sick_notes').select('*, patients(nama, no_rm, jabatan, departemen)').order('tanggal', { ascending: false });
   q = companyFilter(q);
   return unwrap(await q);
 }
@@ -271,6 +324,129 @@ export async function dashboardKpis(monthStart) {
     kpiFilter(supabase.from('v_stock_warnings').select('*')).then(unwrap)
   ]);
   return { kunjungan, topDiseases, topDeptDiseases, topDrugs, sks, rujukan, kk, stock };
+}
+
+// Year-wide dashboard data. When statusPegawai is 'all', reuses the safe
+// aggregate views (works for viewer too, summed across the year's months).
+// Otherwise queries visits+patients directly (dokter/perawat only, enforced
+// by RLS — a viewer session never calls this branch from the UI) so the
+// figures can be filtered by employment status.
+export async function dashboardYearData(year, statusPegawai = 'all') {
+  const yearPrefix = `${year}-`;
+  if (statusPegawai === 'all') {
+    const [kunjungan, topDiseases, topDeptDiseases, topDrugs, sks, rujukan, kk, stock] = await Promise.all([
+      kpiFilter(supabase.from('v_kpi_kunjungan').select('*')).then(unwrap),
+      kpiFilter(supabase.from('v_top_diseases').select('*')).then(unwrap),
+      kpiFilter(supabase.from('v_top_diseases_departemen').select('*')).then(unwrap),
+      kpiFilter(supabase.from('v_top_drugs').select('*')).then(unwrap),
+      kpiFilter(supabase.from('v_kpi_sks').select('*')).then(unwrap),
+      kpiFilter(supabase.from('v_kpi_rujukan').select('*')).then(unwrap),
+      kpiFilter(supabase.from('v_kpi_kecelakaan_kerja').select('*')).then(unwrap),
+      kpiFilter(supabase.from('v_stock_warnings').select('*')).then(unwrap)
+    ]);
+    const inYear = row => String(row.bulan).startsWith(yearPrefix);
+    return {
+      kunjungan: kunjungan.filter(inYear), topDiseases: topDiseases.filter(inYear),
+      topDeptDiseases: topDeptDiseases.filter(inYear), topDrugs: topDrugs.filter(inYear),
+      sks: sks.filter(inYear), rujukan: rujukan.filter(inYear), kk: kk.filter(inYear), stock
+    };
+  }
+
+  let vq = supabase.from('visits').select('*, patients!inner(departemen, status_pegawai), visit_obat(qty, drugs(nama))')
+    .gte('tanggal', `${year}-01-01`).lte('tanggal', `${year}-12-31`).eq('patients.status_pegawai', statusPegawai);
+  vq = companyFilter(vq);
+  const visits = unwrap(await vq);
+
+  const diseaseMap = {}, deptDiseaseMap = {}, drugMap = {};
+  let totalKunjungan = 0, totalKk = 0;
+  const kkByTingkat = { FA: 0, MA: 0, LTI: 0 };
+  for (const v of visits) {
+    totalKunjungan++;
+    for (const d of v.diagnosa || []) {
+      diseaseMap[d.code] = diseaseMap[d.code] || { kode: d.code, penyakit: d.desc, jumlah: 0 };
+      diseaseMap[d.code].jumlah++;
+      const dept = v.patients?.departemen || 'Tidak diketahui';
+      deptDiseaseMap[dept] = deptDiseaseMap[dept] || {};
+      deptDiseaseMap[dept][d.code] = deptDiseaseMap[dept][d.code] || { penyakit: d.desc, jumlah: 0 };
+      deptDiseaseMap[dept][d.code].jumlah++;
+    }
+    for (const vo of v.visit_obat || []) {
+      const nama = vo.drugs?.nama || '-';
+      drugMap[nama] = (drugMap[nama] || 0) + Number(vo.qty);
+    }
+    if (v.jenis_kunjungan === 'kecelakaan_kerja') {
+      totalKk++;
+      const t = v.kecelakaan_kerja?.tingkat;
+      if (t) kkByTingkat[t] = (kkByTingkat[t] || 0) + 1;
+    }
+  }
+
+  let sksQ = supabase.from('sick_notes').select('id, patients!inner(status_pegawai)').gte('tanggal', `${year}-01-01`).lte('tanggal', `${year}-12-31`).eq('patients.status_pegawai', statusPegawai);
+  sksQ = companyFilter(sksQ);
+  let rujQ = supabase.from('referrals').select('id, patients!inner(status_pegawai)').gte('tanggal', `${year}-01-01`).lte('tanggal', `${year}-12-31`).eq('patients.status_pegawai', statusPegawai);
+  rujQ = companyFilter(rujQ);
+  const [sksRows, rujRows, stock] = await Promise.all([unwrap(await sksQ), unwrap(await rujQ), kpiFilter(supabase.from('v_stock_warnings').select('*')).then(unwrap)]);
+
+  return {
+    kunjungan: [{ total_kunjungan: totalKunjungan }],
+    topDiseases: Object.entries(diseaseMap).map(([kode, v]) => ({ kode, ...v })),
+    topDeptDiseases: Object.entries(deptDiseaseMap).flatMap(([departemen, diseases]) => Object.entries(diseases).map(([kode, v]) => ({ departemen, kode, ...v }))),
+    topDrugs: Object.entries(drugMap).map(([nama, jumlah]) => ({ nama, jumlah })),
+    sks: [{ total_sks: sksRows.length }], rujukan: [{ total_rujukan: rujRows.length }],
+    kk: Object.entries(kkByTingkat).map(([tingkat, jumlah]) => ({ tingkat, jumlah })), stock
+  };
+}
+
+// "Perlu Perhatian": patients flagged for follow-up — abnormal vitals on
+// their most recent visit, a chronic-disease tag, a still-open SKS, an
+// LTI work-accident case, or an unresolved observasi/rawat_inap visit in
+// the last 30 days. Dokter/perawat only (relies on direct table RLS).
+export async function patientsNeedingAttention() {
+  const since = new Date(); since.setDate(since.getDate() - 90);
+  const sinceStr = since.toISOString().slice(0, 10);
+
+  let vq = supabase.from('visits').select('*, patients(id, nama, no_rm, departemen, riwayat_kronis)').gte('tanggal', sinceStr).order('tanggal', { ascending: false });
+  vq = companyFilter(vq);
+  const visits = unwrap(await vq);
+
+  let snq = supabase.from('sick_notes').select('patient_id, tanggal_selesai, patients(nama, no_rm, departemen)').gte('tanggal_selesai', todayStr());
+  snq = companyFilter(snq);
+  const activeSickNotes = unwrap(await snq);
+
+  const byPatient = {};
+  function flag(patient, reason) {
+    if (!patient) return;
+    if (!byPatient[patient.id]) byPatient[patient.id] = { patient, reasons: [] };
+    if (!byPatient[patient.id].reasons.includes(reason)) byPatient[patient.id].reasons.push(reason);
+  }
+
+  const seenLatestVisit = new Set();
+  for (const v of visits) {
+    const p = v.patients;
+    if (!p) continue;
+    if (!seenLatestVisit.has(p.id)) {
+      seenLatestVisit.add(p.id);
+      const flags = evaluateVitals(v.vitals || {});
+      if (flags.length) flag(p, `Tanda vital abnormal (${flags.map(f => f.label).join(', ')})`);
+    }
+    if (p.riwayat_kronis?.length) flag(p, `Riwayat kronis: ${p.riwayat_kronis.join(', ')}`);
+    if (['observasi', 'rawat_inap'].includes(v.disposisi)) {
+      const days = Math.round((new Date() - new Date(v.tanggal)) / 86400000);
+      if (days <= 30) flag(p, `${v.disposisi === 'rawat_inap' ? 'Rawat inap' : 'Observasi'} ${days} hari lalu`);
+    }
+    if (v.jenis_kunjungan === 'kecelakaan_kerja' && v.kecelakaan_kerja?.tingkat === 'LTI') {
+      flag(p, 'Kasus LTI — perlu tindak lanjut');
+    }
+  }
+  for (const sn of activeSickNotes) {
+    if (sn.patients) flag(sn.patients, `Masih dalam masa istirahat s/d ${fmtDateShort(sn.tanggal_selesai)}`);
+  }
+
+  return Object.values(byPatient);
+}
+
+function fmtDateShort(iso) {
+  return new Date(iso + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'short' });
 }
 
 // ---------------- Users / activity log (dokter only) ----------------
@@ -308,4 +484,62 @@ export async function exportSnapshot() {
     data[table] = unwrap(await supabase.from(table).select('*'));
   }
   return { exportedAt: new Date().toISOString(), app: 'inhouse-clinic-system', data };
+}
+
+// ---------------- Print signatures (editable names shown on printed docs) ----------------
+export async function getPrintSignatures(companyId) {
+  const { data } = await supabase.from('print_signatures').select('*').eq('company_id', companyId).maybeSingle();
+  return data || { company_id: companyId, nama_dokter: '', nama_apoteker: '', nama_admin_hrd: '' };
+}
+
+export async function savePrintSignatures(companyId, payload) {
+  return unwrap(await supabase.from('print_signatures').upsert({ company_id: companyId, ...payload }).select().single());
+}
+
+// ---------------- Consent / refusal forms ----------------
+export async function listConsentForms() {
+  let q = supabase.from('consent_forms').select('*, patients(nama, no_rm)').order('tanggal', { ascending: false });
+  q = companyFilter(q);
+  return unwrap(await q);
+}
+export async function createConsentForm(payload) {
+  const row = await unwrap(await supabase.from('consent_forms').insert(payload).select().single());
+  logActivity(payload.company_id, 'create_consent_form', 'consent_forms', row.id, { tipe: payload.tipe });
+  return row;
+}
+
+// ---------------- Drug requests (permintaan pengadaan obat) ----------------
+export async function listDrugRequests() {
+  let q = supabase.from('drug_requests').select('*').order('tanggal', { ascending: false });
+  q = companyFilter(q);
+  return unwrap(await q);
+}
+export async function nextNomorPermintaan(companyId) {
+  const { count } = await supabase.from('drug_requests').select('id', { count: 'exact', head: true }).eq('company_id', companyId);
+  const year = new Date().getFullYear();
+  return `PO/${String((count || 0) + 1).padStart(4, '0')}/${year}`;
+}
+export async function createDrugRequest(payload) {
+  const row = await unwrap(await supabase.from('drug_requests').insert(payload).select().single());
+  logActivity(payload.company_id, 'create_drug_request', 'drug_requests', row.id, { nomor: payload.nomor_permintaan });
+  return row;
+}
+
+// ---------------- Data completeness notifications ----------------
+export async function dataCompletenessIssues() {
+  let pq = supabase.from('patients').select('id, nama, no_rm, nik, no_hp, departemen, jabatan');
+  pq = companyFilter(pq);
+  const patients = unwrap(await pq);
+  const missingNik = patients.filter(p => !p.nik);
+  const missingDept = patients.filter(p => !p.departemen);
+  const missingPhone = patients.filter(p => !p.no_hp);
+
+  let dq = supabase.from('drugs').select('id, nama, kategori_id');
+  const drugs = unwrap(await dq);
+  const missingCategory = drugs.filter(d => !d.kategori_id);
+
+  return {
+    missingNik, missingDept, missingPhone, missingCategory,
+    total: missingNik.length + missingDept.length + missingPhone.length + missingCategory.length
+  };
 }

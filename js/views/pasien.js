@@ -1,8 +1,9 @@
 import * as api from '../api.js';
 import { el, escapeHtml, fmtDate, toast, openModal, debounce, confirmDialog, todayStr } from '../util.js';
 import { getCompanies, getCompanyById, getSelectedCompanyId, isAllCompanies, getDiseaseCodes, fmtAge } from '../state.js';
-import { printPatientCard } from '../print.js';
+import { printPatientCard, printMedicalConsentForm } from '../print.js';
 import { hasRole } from '../auth.js';
+import { VITAL_FIELDS, evaluateVitals, CHRONIC_DISEASE_OPTIONS } from '../clinical.js';
 
 const STATUS_LABEL = { menunggu: 'Menunggu', diperiksa: 'Diperiksa', selesai: 'Selesai' };
 const STATUS_BADGE = { menunggu: 'badge-warn', diperiksa: 'badge-info', selesai: 'badge-ok' };
@@ -38,7 +39,7 @@ export async function renderPasien(root) {
 
   queueBtn.addEventListener('click', () => setActive('queue'));
   listBtn.addEventListener('click', () => setActive('list'));
-  root.querySelector('#btnNewPatient').addEventListener('click', () => openNewPatientModal(() => setActive(activeTab)));
+  root.querySelector('#btnNewPatient').addEventListener('click', () => openNewPatientModal(() => setActive('queue')));
 
   setActive('queue');
 }
@@ -100,7 +101,7 @@ async function renderPatientListTab(container) {
     container.querySelector('#patCount').textContent = `(${list.length})`;
     if (!list.length) { rows.innerHTML = `<tr><td colspan="8" class="empty">Tidak ada pasien.</td></tr>`; return; }
     rows.innerHTML = list.map(p => `
-      <tr>
+      <tr data-detail="${p.id}" style="cursor:pointer">
         <td>${escapeHtml(p.no_rm)}</td>
         <td>${escapeHtml(p.nama)}</td>
         <td>${fmtAge(p.tgl_lahir)}</td>
@@ -110,17 +111,20 @@ async function renderPatientListTab(container) {
         <td>${escapeHtml(p.companies?.code || '-')}</td>
         <td style="display:flex;gap:6px">
           <button class="btn btn-sm btn-outline" data-daftar="${p.id}">Antrian</button>
-          <button class="btn btn-sm btn-outline" data-cetak="${p.id}">Kartu</button>
         </td>
       </tr>`).join('');
-    rows.querySelectorAll('[data-daftar]').forEach(btn => btn.addEventListener('click', async () => {
-      const p = list.find(x => x.id === btn.dataset.daftar);
-      await api.addToQueue(p.company_id, p, '', p.status_pegawai === 'mitra_kerja' ? 'Poli Kecelakaan Kerja / Umum' : 'Poli Umum');
-      toast(`${p.nama} ditambahkan ke antrian`);
+
+    rows.querySelectorAll('tr[data-detail]').forEach(tr => tr.addEventListener('click', e => {
+      if (e.target.closest('button')) return;
+      const p = list.find(x => x.id === tr.dataset.detail);
+      openPatientDetailModal(p, () => draw(container.querySelector('#patSearch').value.trim()));
     }));
-    rows.querySelectorAll('[data-cetak]').forEach(btn => btn.addEventListener('click', () => {
-      const p = list.find(x => x.id === btn.dataset.cetak);
-      printPatientCard(p, p.companies);
+    rows.querySelectorAll('[data-daftar]').forEach(btn => btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const p = list.find(x => x.id === btn.dataset.daftar);
+      const q = await api.addToQueue(p.company_id, p, '', p.status_pegawai === 'mitra_kerja' ? 'Poli Kecelakaan Kerja / Umum' : 'Poli Umum');
+      const posisi = await api.queuePositionToday(p.company_id, q.id);
+      toast(`${p.nama} masuk antrian — Nomor Antrian: ${posisi}`);
     }));
   }
   draw();
@@ -128,15 +132,129 @@ async function renderPatientListTab(container) {
   container.querySelector('#patSearch').addEventListener('input', debounce(e => draw(e.target.value.trim()), 250));
 }
 
+function openPatientDetailModal(patient, onChange) {
+  openModal(`Detail Pasien: ${patient.nama}`, `
+    <div class="grid cols-2" style="margin-bottom:14px">
+      <div><b>No. RM</b><div>${escapeHtml(patient.no_rm)}</div></div>
+      <div><b>NIK</b><div>${escapeHtml(patient.nik || '-')}</div></div>
+      <div><b>Usia</b><div>${fmtAge(patient.tgl_lahir)} (${fmtDate(patient.tgl_lahir)})</div></div>
+      <div><b>Jenis Kelamin</b><div>${patient.jenis_kelamin === 'L' ? 'Laki-laki' : 'Perempuan'}</div></div>
+      <div><b>Jabatan</b><div>${escapeHtml(patient.jabatan || '-')}</div></div>
+      <div><b>Departemen</b><div>${escapeHtml(patient.departemen || '-')}</div></div>
+      <div><b>Status Pegawai</b><div>${STATUS_PEGAWAI_LABEL[patient.status_pegawai] || patient.status_pegawai}</div></div>
+      <div><b>PT</b><div>${escapeHtml(patient.companies?.name || '-')}</div></div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+      <button class="btn btn-sm btn-primary" id="btnDaftarAntrian">+ Antrian</button>
+      <button class="btn btn-sm btn-outline" id="btnCetakKartu">Cetak Kartu</button>
+      <button class="btn btn-sm btn-outline" id="btnEditPasien">Edit</button>
+      <button class="btn btn-sm btn-outline" id="btnConsent">Persetujuan/Penolakan Medis</button>
+      <button class="btn btn-sm btn-danger" id="btnHapusPasien">Hapus</button>
+    </div>
+    <h2 style="font-size:.95rem;margin-bottom:8px">Riwayat Kunjungan</h2>
+    <div class="table-wrap" id="visitHistory"><div class="empty">Memuat...</div></div>
+  `, {
+    onMount: async (body, close) => {
+      body.querySelector('#btnDaftarAntrian').addEventListener('click', async () => {
+        const q = await api.addToQueue(patient.company_id, patient, '', patient.status_pegawai === 'mitra_kerja' ? 'Poli Kecelakaan Kerja / Umum' : 'Poli Umum');
+        const posisi = await api.queuePositionToday(patient.company_id, q.id);
+        toast(`${patient.nama} masuk antrian — Nomor Antrian: ${posisi}`);
+      });
+      body.querySelector('#btnCetakKartu').addEventListener('click', () => printPatientCard(patient, patient.companies));
+      body.querySelector('#btnEditPasien').addEventListener('click', () => { close(); openEditPatientModal(patient, onChange); });
+      body.querySelector('#btnConsent').addEventListener('click', () => { close(); openConsentModal(patient); });
+      body.querySelector('#btnHapusPasien').addEventListener('click', async () => {
+        if (!confirmDialog(`Hapus data pasien ${patient.nama}? Tindakan ini permanen.`)) return;
+        try {
+          await api.deletePatient(patient.id);
+          toast('Data pasien dihapus');
+          close();
+          onChange();
+        } catch (err) {
+          toast(err.message || 'Gagal menghapus pasien', 'err');
+        }
+      });
+
+      const visits = await api.getVisitsByPatient(patient.id);
+      const histEl = body.querySelector('#visitHistory');
+      histEl.innerHTML = visits.length ? `<table>
+        <thead><tr><th>Tanggal</th><th>Jenis</th><th>Diagnosa</th><th>Disposisi</th><th>Biaya</th></tr></thead>
+        <tbody>${visits.map(v => `<tr>
+          <td>${fmtDate(v.tanggal)}</td><td>${escapeHtml(v.jenis_kunjungan)}</td>
+          <td>${(v.diagnosa || []).map(d => escapeHtml(d.code)).join(', ') || '-'}</td>
+          <td>${escapeHtml(v.disposisi)}</td><td>Rp ${Number(v.biaya_total || 0).toLocaleString('id-ID')}</td>
+        </tr>`).join('')}</tbody></table>` : `<div class="empty">Belum ada riwayat kunjungan.</div>`;
+    }
+  });
+}
+
+function openEditPatientModal(patient, onDone) {
+  openModal('Edit Data Pasien', `
+    <form id="editPatientForm" class="form-grid">
+      <div class="field"><label>Nama Lengkap *</label><input name="nama" value="${escapeHtml(patient.nama)}" required></div>
+      <div class="field"><label>NIK</label><input name="nik" maxlength="16" value="${escapeHtml(patient.nik || '')}"></div>
+      <div class="field"><label>Tanggal Lahir *</label><input type="date" name="tgl_lahir" value="${patient.tgl_lahir}" required></div>
+      <div class="field"><label>Jenis Kelamin *</label>
+        <select name="jenis_kelamin" required>
+          <option value="L" ${patient.jenis_kelamin === 'L' ? 'selected' : ''}>Laki-laki</option>
+          <option value="P" ${patient.jenis_kelamin === 'P' ? 'selected' : ''}>Perempuan</option>
+        </select>
+      </div>
+      <div class="field full"><label>Alamat / Tempat Tinggal</label><input name="tempat_tinggal" value="${escapeHtml(patient.tempat_tinggal || '')}"></div>
+      <div class="field"><label>No. HP</label><input name="no_hp" value="${escapeHtml(patient.no_hp || '')}"></div>
+      <div class="field"><label>Jabatan / Pekerjaan</label><input name="jabatan" value="${escapeHtml(patient.jabatan || '')}"></div>
+      <div class="field"><label>Departemen</label><input name="departemen" value="${escapeHtml(patient.departemen || '')}"></div>
+      <div class="field"><label>Status Pegawai *</label>
+        <select name="status_pegawai" required>
+          ${Object.entries(STATUS_PEGAWAI_LABEL).map(([v, l]) => `<option value="${v}" ${patient.status_pegawai === v ? 'selected' : ''}>${l}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field full"><label>Riwayat Penyakit Kronis (butuh treatment berkala)</label>
+        <div class="checkline" style="flex-wrap:wrap">
+          ${CHRONIC_DISEASE_OPTIONS.map(opt => `<label style="font-weight:400;font-size:.82rem"><input type="checkbox" name="kronis" value="${escapeHtml(opt)}" ${(patient.riwayat_kronis || []).includes(opt) ? 'checked' : ''}> ${escapeHtml(opt)}</label>`).join('')}
+        </div>
+      </div>
+      <div class="field full" style="display:flex;justify-content:flex-end;gap:8px">
+        <button type="button" class="btn btn-outline" id="cancelBtn">Batal</button>
+        <button type="submit" class="btn btn-primary">Simpan Perubahan</button>
+      </div>
+    </form>
+  `, {
+    onMount: (body, close) => {
+      body.querySelector('#cancelBtn').addEventListener('click', close);
+      body.querySelector('#editPatientForm').addEventListener('submit', async e => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        try {
+          await api.updatePatient(patient.id, {
+            nama: fd.get('nama').trim(), nik: fd.get('nik').trim() || null, tgl_lahir: fd.get('tgl_lahir'),
+            jenis_kelamin: fd.get('jenis_kelamin'), tempat_tinggal: fd.get('tempat_tinggal').trim(),
+            no_hp: fd.get('no_hp').trim(), jabatan: fd.get('jabatan').trim(), departemen: fd.get('departemen').trim(),
+            status_pegawai: fd.get('status_pegawai'), riwayat_kronis: fd.getAll('kronis')
+          });
+          toast('Data pasien diperbarui');
+          close();
+          onDone();
+        } catch (err) {
+          toast(err.message || 'Gagal memperbarui data pasien', 'err');
+        }
+      });
+    }
+  });
+}
+
 function openNewPatientModal(onDone) {
   const companies = getCompanies();
   const sel = getSelectedCompanyId();
-  const defaultCompany = isAllCompanies() ? companies[0]?.id : sel;
+  const lockedCompany = !isAllCompanies();
+  const defaultCompany = lockedCompany ? sel : companies[0]?.id;
 
   openModal('Pendaftaran Pasien Baru', `
     <form id="newPatientForm" class="form-grid">
       <div class="field"><label>PT / Perusahaan *</label>
-        <select name="company_id" required>${companies.map(c => `<option value="${c.id}" ${c.id === defaultCompany ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}</select>
+        ${lockedCompany
+          ? `<input value="${escapeHtml(getCompanyById(sel)?.name || '')}" disabled><input type="hidden" name="company_id" value="${sel}">`
+          : `<select name="company_id" required>${companies.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>`}
       </div>
       <div class="field"><label>Nama Lengkap *</label><input name="nama" required></div>
       <div class="field"><label>NIK</label><input name="nik" maxlength="16"></div>
@@ -194,15 +312,35 @@ function openNewPatientModal(onDone) {
             status_pegawai: fd.get('status_pegawai'), nama_pt_mitra: fd.get('nama_pt_mitra')?.trim() || null,
             lokasi_kerja: fd.get('lokasi_kerja')?.trim() || null
           });
-          await api.addToQueue(companyId, patient, fd.get('keluhan').trim(), 'Poli Umum');
-          toast(`Pasien ${patient.nama} terdaftar dengan No. RM ${no_rm}`);
-          printPatientCard(patient, getCompanyById(companyId));
+          const q = await api.addToQueue(companyId, patient, fd.get('keluhan').trim(), 'Poli Umum');
+          const posisi = await api.queuePositionToday(companyId, q.id);
           close();
           onDone();
+          openRegistrationSuccessModal(patient, posisi);
         } catch (err) {
           toast(err.message || 'Gagal mendaftarkan pasien', 'err');
         }
       });
+    }
+  });
+}
+
+function openRegistrationSuccessModal(patient, posisi) {
+  openModal('Pendaftaran Berhasil', `
+    <div style="text-align:center;padding:10px 0 20px">
+      <div style="font-size:.85rem;color:var(--muted);margin-bottom:6px">Nomor Antrian</div>
+      <div style="font-size:3rem;font-weight:800;color:var(--primary);line-height:1">${posisi}</div>
+      <div style="margin-top:10px;font-weight:600">${escapeHtml(patient.nama)}</div>
+      <div style="font-size:.85rem;color:var(--muted)">No. RM: ${escapeHtml(patient.no_rm)}</div>
+    </div>
+    <div style="display:flex;justify-content:center;gap:8px">
+      <button type="button" class="btn btn-outline" id="btnCetak">Cetak Kartu Pasien</button>
+      <button type="button" class="btn btn-primary" id="btnTutup">Selesai</button>
+    </div>
+  `, {
+    onMount: (body, close) => {
+      body.querySelector('#btnCetak').addEventListener('click', () => printPatientCard(patient, patient.companies || getCompanyById(patient.company_id)));
+      body.querySelector('#btnTutup').addEventListener('click', close);
     }
   });
 }
@@ -233,10 +371,10 @@ async function openSoapModal(queueItem, onDone) {
           <h2>Detail Kecelakaan Kerja</h2>
           <div class="grid cols-3">
             <div class="field"><label>Tingkat Keparahan *</label>
-              <select name="tingkat">
-                <option value="FA">First Aid (FA)</option>
-                <option value="MA">Medical Aid (MA)</option>
-                <option value="LTI">Lost Time Injury (LTI)</option>
+              <select name="tingkat" id="tingkatKK">
+                <option value="FA">First Aid (FA) — 0 hari istirahat</option>
+                <option value="MA">Medical Aid (MA) — 1-3 hari istirahat</option>
+                <option value="LTI">Lost Time Injury (LTI) — &gt;3 hari istirahat</option>
               </select>
             </div>
             <div class="field"><label>Tanggal Kejadian</label><input type="date" name="tanggalKejadian" value="${todayStr()}"></div>
@@ -253,8 +391,18 @@ async function openSoapModal(queueItem, onDone) {
 
       <div class="grid cols-2">
         <div class="field full"><label>S — Subjective (keluhan pasien)</label><textarea name="subjective">${escapeHtml(queueItem.keluhan || '')}</textarea></div>
-        <div class="field full"><label>O — Objective (pemeriksaan fisik/tanda vital)</label><textarea name="objective"></textarea></div>
       </div>
+
+      <div class="field full">
+        <label>O — Objective: Tanda Vital</label>
+        <div class="grid cols-4" id="vitalsGrid">
+          ${VITAL_FIELDS.map(f => `
+            <div class="field"><label>${escapeHtml(f.label)} (${escapeHtml(f.unit)})</label><input type="number" step="any" data-vital="${f.key}"></div>
+          `).join('')}
+        </div>
+        <div id="vitalsAlert" style="display:none;margin-top:8px" class="badge badge-danger"></div>
+      </div>
+      <div class="field full"><label>Pemeriksaan Fisik Lainnya</label><textarea name="objective" placeholder="Temuan pemeriksaan fisik lain di luar tanda vital..."></textarea></div>
 
       <div class="field full">
         <label>A — Assessment (Diagnosa)</label>
@@ -283,6 +431,7 @@ async function openSoapModal(queueItem, onDone) {
       <div id="sksBlock" style="display:none" class="grid cols-2">
         <div class="field"><label>Mulai Istirahat</label><input type="date" name="sksMulai"></div>
         <div class="field"><label>Sampai Tanggal</label><input type="date" name="sksSelesai"></div>
+        <div class="field full muted" id="sksHint" style="font-size:.78rem"></div>
       </div>
 
       <div class="field full">
@@ -306,13 +455,61 @@ async function openSoapModal(queueItem, onDone) {
   `, {
     onMount: (body, close) => {
       body.querySelector('#cancelBtn').addEventListener('click', close);
+
+      const vitalsAlert = body.querySelector('#vitalsAlert');
+      function collectVitals() {
+        const vitals = {};
+        body.querySelectorAll('[data-vital]').forEach(input => {
+          if (input.value !== '') vitals[input.dataset.vital] = Number(input.value);
+        });
+        return vitals;
+      }
+      function checkVitals() {
+        const flags = evaluateVitals(collectVitals());
+        if (flags.length) {
+          vitalsAlert.style.display = '';
+          vitalsAlert.textContent = `⚠ Nilai abnormal: ${flags.map(f => `${f.label} ${f.value}${f.unit} (${f.direction === 'high' ? 'tinggi' : 'rendah'})`).join(', ')}`;
+        } else {
+          vitalsAlert.style.display = 'none';
+        }
+      }
+      body.querySelectorAll('[data-vital]').forEach(input => input.addEventListener('input', checkVitals));
+
       const kerjaBlock = body.querySelector('#kerjaBlock');
       body.querySelector('#jenisKunjungan').addEventListener('change', e => {
         kerjaBlock.style.display = e.target.value === 'kecelakaan_kerja' ? '' : 'none';
+        if (e.target.value === 'kecelakaan_kerja') applyKkSksRule();
       });
-      body.querySelector('#sksCheckbox').addEventListener('change', e => {
-        body.querySelector('#sksBlock').style.display = e.target.checked ? 'grid' : 'none';
+      const sksCheckbox = body.querySelector('#sksCheckbox');
+      const sksBlock = body.querySelector('#sksBlock');
+      sksCheckbox.addEventListener('change', e => {
+        sksBlock.style.display = e.target.checked ? 'grid' : 'none';
       });
+
+      const KK_SKS_RULE = {
+        FA: { hari: 0, hint: 'First Aid (FA): tidak memerlukan hari istirahat.' },
+        MA: { hari: 3, hint: 'Medical Aid (MA): pedoman istirahat 1-3 hari. Sesuaikan tanggal bila perlu.' },
+        LTI: { hari: 7, hint: 'Lost Time Injury (LTI): istirahat lebih dari 3 hari. Sesuaikan tanggal sesuai rekomendasi medis.' }
+      };
+      function applyKkSksRule() {
+        const tingkat = body.querySelector('#tingkatKK').value;
+        const rule = KK_SKS_RULE[tingkat];
+        if (!rule) return;
+        body.querySelector('#sksHint').textContent = rule.hint;
+        if (rule.hari === 0) {
+          sksCheckbox.checked = false;
+          sksBlock.style.display = 'none';
+        } else {
+          sksCheckbox.checked = true;
+          sksBlock.style.display = 'grid';
+          const mulai = todayStr();
+          const selesai = new Date();
+          selesai.setDate(selesai.getDate() + rule.hari);
+          body.querySelector('[name=sksMulai]').value = mulai;
+          body.querySelector('[name=sksSelesai]').value = selesai.toISOString().slice(0, 10);
+        }
+      }
+      body.querySelector('#tingkatKK').addEventListener('change', applyKkSksRule);
 
       const icdTags = body.querySelector('#icdTags');
       function drawIcdTags() {
@@ -378,7 +575,8 @@ async function openSoapModal(queueItem, onDone) {
           company_id: patient.company_id, patient_id: patient.id, queue_id: queueItem.id,
           jenis_kunjungan: jenisKunjungan, subjective: fd.get('subjective').trim(), objective: fd.get('objective').trim(),
           diagnosa: icdSelected, plan: fd.get('plan').trim(), disposisi: fd.get('disposisi'),
-          lama_observasi_hari: Number(fd.get('lamaObservasi')) || 0, dokter: fd.get('dokter').trim()
+          lama_observasi_hari: Number(fd.get('lamaObservasi')) || 0, dokter: fd.get('dokter').trim(),
+          vitals: collectVitals()
         };
         if (jenisKunjungan === 'kecelakaan_kerja') {
           visitPayload.kecelakaan_kerja = {
@@ -406,6 +604,51 @@ async function openSoapModal(queueItem, onDone) {
           onDone();
         } catch (err) {
           toast(err.message || 'Gagal menyimpan pemeriksaan', 'err');
+        }
+      });
+    }
+  });
+}
+
+function openConsentModal(patient) {
+  openModal('Form Persetujuan / Penolakan Tindakan Medis', `
+    <form id="consentForm">
+      <div class="field" style="margin-bottom:12px"><label>Jenis *</label>
+        <select name="tipe"><option value="persetujuan">Persetujuan (Informed Consent)</option><option value="penolakan">Penolakan Tindakan</option></select>
+      </div>
+      <div class="field" style="margin-bottom:12px"><label>Tindakan/Prosedur Medis *</label><input name="tindakan" required placeholder="mis. Jahit luka, rujuk observasi, dsb."></div>
+      <div class="field" style="margin-bottom:12px"><label>Penjelasan Risiko yang Disampaikan</label><textarea name="penjelasanRisiko"></textarea></div>
+      <div class="grid cols-2">
+        <div class="field"><label>Nama Saksi</label><input name="namaSaksi"></div>
+        <div class="field"><label>Nama Petugas Medis</label><input name="namaPetugas"></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+        <button type="button" class="btn btn-outline" id="cancelBtn">Batal</button>
+        <button type="submit" class="btn btn-primary">Simpan &amp; Cetak</button>
+      </div>
+    </form>
+  `, {
+    onMount: (body, close) => {
+      body.querySelector('#cancelBtn').addEventListener('click', close);
+      body.querySelector('#consentForm').addEventListener('submit', async e => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const form = {
+          tanggal: todayStr(), tindakan: fd.get('tindakan').trim(), penjelasanRisiko: fd.get('penjelasanRisiko').trim(),
+          namaSaksi: fd.get('namaSaksi').trim(), namaPetugas: fd.get('namaPetugas').trim()
+        };
+        try {
+          await api.createConsentForm({
+            company_id: patient.company_id, patient_id: patient.id, tipe: fd.get('tipe'),
+            tindakan: form.tindakan, penjelasan_risiko: form.penjelasanRisiko,
+            nama_saksi: form.namaSaksi, nama_petugas: form.namaPetugas, tanggal: form.tanggal
+          });
+          const sig = await api.getPrintSignatures(patient.company_id);
+          toast('Form tersimpan');
+          close();
+          printMedicalConsentForm(patient, patient.companies || getCompanyById(patient.company_id), fd.get('tipe'), form, sig);
+        } catch (err) {
+          toast(err.message || 'Gagal menyimpan form', 'err');
         }
       });
     }

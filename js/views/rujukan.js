@@ -35,7 +35,8 @@ export async function renderRujukan(root) {
     rows.querySelectorAll('[data-print]').forEach(btn => btn.addEventListener('click', async () => {
       const r = referrals.find(x => x.id === btn.dataset.print);
       const patient = await api.getPatient(r.patient_id);
-      printReferral(r, patient, patient.companies);
+      const sig = await api.getPrintSignatures(r.company_id);
+      printReferral(r, patient, patient.companies, sig);
     }));
   }
 

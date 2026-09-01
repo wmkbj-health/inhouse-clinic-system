@@ -1,21 +1,35 @@
 import { signIn } from '../auth.js';
 import { toast } from '../util.js';
 
+const COMPANY_LOGOS = [
+  { code: 'WSL', name: 'PT Wana Subur Lestari' },
+  { code: 'MTI', name: 'PT Mayangkara Tanaman Industri' },
+  { code: 'KMF', name: 'PT Kubu Mulia Forestry' },
+  { code: 'BIOS', name: 'PT Bina Ovivipari Semesta' },
+  { code: 'JLA', name: 'PT Jelai Lestari Abadi' }
+];
+
 export function renderLogin(root, onSuccess) {
   root.innerHTML = `
-    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px">
-      <div class="panel" style="max-width:380px;width:100%">
-        <div style="text-align:center;margin-bottom:18px">
-          <img src="assets/icon.svg" alt="Logo" style="width:64px;height:64px;margin-bottom:10px">
-          <h1 style="font-size:1.2rem">Inhouse Clinic System</h1>
-          <p class="desc" style="margin-top:4px">Masuk untuk melanjutkan</p>
+    <div class="login-screen">
+      <div class="login-card">
+        <div class="login-brand">
+          <img src="assets/icon.svg" alt="Logo">
+          <h1>Inhouse Clinic System</h1>
+          <p>Klinik Digital Terpadu — Masuk untuk melanjutkan</p>
         </div>
         <form id="loginForm">
-          <div class="field" style="margin-bottom:12px"><label>Email</label><input type="email" name="email" required autocomplete="username"></div>
-          <div class="field" style="margin-bottom:16px"><label>Kata Sandi</label><input type="password" name="password" required autocomplete="current-password"></div>
+          <div class="field" style="margin-bottom:14px"><label>Email</label><input type="email" name="email" required autocomplete="username" placeholder="nama@klinik.com"></div>
+          <div class="field" style="margin-bottom:18px"><label>Kata Sandi</label><input type="password" name="password" required autocomplete="current-password" placeholder="••••••••"></div>
           <button type="submit" class="btn btn-primary" style="width:100%">Masuk</button>
         </form>
-        <p class="desc" style="margin-top:14px;text-align:center;font-size:.78rem">Belum punya akun? Hubungi dokter/admin klinik Anda untuk dibuatkan akses.</p>
+        <p class="login-hint">Belum punya akun? Hubungi dokter/admin klinik Anda untuk dibuatkan akses.</p>
+        <div class="login-companies">
+          <div class="login-companies-label">Melayani kesehatan karyawan di</div>
+          <div class="login-companies-row">
+            ${COMPANY_LOGOS.map(c => `<img src="assets/logos/${c.code.toLowerCase()}.png" alt="${c.name}" title="${c.name}" onerror="this.style.display='none'">`).join('')}
+          </div>
+        </div>
       </div>
     </div>
   `;

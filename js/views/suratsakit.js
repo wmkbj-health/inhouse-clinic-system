@@ -11,7 +11,7 @@ export async function renderSuratSakit(root) {
     <div class="panel">
       <h2>Riwayat Surat <span class="muted" id="count"></span></h2>
       <div class="table-wrap"><table>
-        <thead><tr><th>No. Surat</th><th>Tanggal</th><th>Nama Pasien</th><th>Istirahat</th><th>Diagnosa</th><th></th></tr></thead>
+        <thead><tr><th>No. Surat</th><th>Tanggal</th><th>Nama Pasien</th><th>Jabatan</th><th>Departemen</th><th>Istirahat</th><th></th></tr></thead>
         <tbody id="rows"></tbody>
       </table></div>
     </div>
@@ -22,24 +22,41 @@ export async function renderSuratSakit(root) {
 
   const rows = root.querySelector('#rows');
   if (!notes.length) {
-    rows.innerHTML = `<tr><td colspan="6" class="empty">Belum ada surat keterangan sakit.</td></tr>`;
+    rows.innerHTML = `<tr><td colspan="7" class="empty">Belum ada surat keterangan sakit.</td></tr>`;
   } else {
     rows.innerHTML = notes.map(n => `<tr>
         <td>${escapeHtml(n.nomor_surat)}</td>
         <td>${fmtDate(n.tanggal)}</td>
         <td>${escapeHtml(n.patients?.nama || '(pasien dihapus)')}</td>
+        <td>${escapeHtml(n.patients?.jabatan || '-')}</td>
+        <td>${escapeHtml(n.patients?.departemen || '-')}</td>
         <td>${fmtDate(n.tanggal_mulai)} s/d ${fmtDate(n.tanggal_selesai)}</td>
-        <td>${escapeHtml(n.diagnosa || '-')}</td>
         <td><button class="btn btn-sm btn-outline" data-print="${n.id}">Cetak</button></td>
       </tr>`).join('');
     rows.querySelectorAll('[data-print]').forEach(btn => btn.addEventListener('click', async () => {
       const n = notes.find(x => x.id === btn.dataset.print);
       const patient = await api.getPatient(n.patient_id);
-      printSickNote(n, patient, patient.companies);
+      const sig = await api.getPrintSignatures(n.company_id);
+      openPrintOptionsModal(n, patient, sig);
     }));
   }
 
   root.querySelector('#btnNew').addEventListener('click', () => openSickNoteModal(() => renderSuratSakit(root)));
+}
+
+function openPrintOptionsModal(note, patient, sig) {
+  openModal('Cetak Surat Keterangan Sakit', `
+    <p class="desc" style="margin-bottom:14px">Diagnosa bersifat rahasia medis. Tampilkan pada surat cetak (mis. untuk lampiran BPJS), atau sembunyikan (surat hanya menyatakan periode istirahat, cocok untuk tembusan HRD)?</p>
+    <div style="display:flex;gap:10px;justify-content:center">
+      <button class="btn btn-outline" id="btnHide">Sembunyikan Diagnosa</button>
+      <button class="btn btn-primary" id="btnShow">Tampilkan Diagnosa</button>
+    </div>
+  `, {
+    onMount: (body, close) => {
+      body.querySelector('#btnHide').addEventListener('click', () => { printSickNote(note, patient, patient.companies, sig, false); close(); });
+      body.querySelector('#btnShow').addEventListener('click', () => { printSickNote(note, patient, patient.companies, sig, true); close(); });
+    }
+  });
 }
 
 async function openSickNoteModal(onDone) {
@@ -50,7 +67,7 @@ async function openSickNoteModal(onDone) {
       <div class="field full"><label>Pasien *</label><div id="patPicker"></div></div>
       <div class="grid cols-2" style="margin-top:12px">
         <div class="field"><label>Tanggal Surat *</label><input type="date" name="tanggal" value="${todayStr()}" required></div>
-        <div class="field"><label>Diagnosa *</label><input name="diagnosa" required></div>
+        <div class="field"><label>Diagnosa (opsional, rahasia medis)</label><input name="diagnosa"></div>
         <div class="field"><label>Mulai Istirahat *</label><input type="date" name="tanggalMulai" value="${todayStr()}" required></div>
         <div class="field"><label>Sampai Tanggal *</label><input type="date" name="tanggalSelesai" value="${todayStr()}" required></div>
       </div>
