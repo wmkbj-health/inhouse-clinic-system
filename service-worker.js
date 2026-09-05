@@ -1,32 +1,20 @@
-const CACHE_NAME = 'ics-clinic-v3';
-const ASSETS = [
-  './',
-  './index.html',
+const CACHE_NAME = 'ics-clinic-v4';
+const STATIC_ASSETS = [
   './manifest.json',
   './css/style.css',
-  './js/app.js',
-  './js/auth.js',
-  './js/api.js',
-  './js/state.js',
-  './js/print.js',
-  './js/realtime.js',
-  './js/util.js',
-  './js/supabaseClient.js',
-  './js/supabase-config.js',
-  './js/views/login.js',
-  './js/views/akun.js',
-  './js/views/dashboard.js',
-  './js/views/apotek.js',
-  './js/views/pasien.js',
-  './js/views/rujukan.js',
-  './js/views/kecelakaan.js',
-  './js/views/suratsakit.js',
-  './assets/icon.svg'
+  './assets/app-icon.png',
+  './assets/app-icon-192.png',
+  './assets/favicon-32.png',
+  './assets/logos/wsl.png',
+  './assets/logos/mti.png',
+  './assets/logos/kmf.png',
+  './assets/logos/bios.png',
+  './assets/logos/jla.png'
 ];
 
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting())
+    caches.open(CACHE_NAME).then(cache => cache.addAll(STATIC_ASSETS)).then(() => self.skipWaiting())
   );
 });
 
@@ -38,8 +26,32 @@ self.addEventListener('activate', event => {
   );
 });
 
+self.addEventListener('message', event => {
+  if (event.data === 'SKIP_WAITING') self.skipWaiting();
+});
+
+// Network-first for navigations and app code (HTML/JS/JSON) so a deploy is
+// picked up on the very next load; cache-first for static images/CSS only.
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
+  const url = new URL(event.request.url);
+  if (url.origin !== location.origin) return;
+
+  const isAppCode = event.request.mode === 'navigate' ||
+    /\.(js|json|html)$/.test(url.pathname) ||
+    url.pathname === '/' || url.pathname.endsWith('/');
+
+  if (isAppCode) {
+    event.respondWith(
+      fetch(event.request).then(res => {
+        const clone = res.clone();
+        caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+        return res;
+      }).catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then(cached => {
       if (cached) return cached;

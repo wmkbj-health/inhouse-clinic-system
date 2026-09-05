@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="ring" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3fae4e"/>
+      <stop offset="55%" stop-color="#1f8fd6"/>
+      <stop offset="100%" stop-color="#1565c0"/>
+    </linearGradient>
+    <linearGradient id="leaf" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8bd150"/>
+      <stop offset="100%" stop-color="#2f9e44"/>
+    </linearGradient>
+    <linearGradient id="hand" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#2f8fd8"/>
+      <stop offset="100%" stop-color="#125ea8"/>
+    </linearGradient>
+  </defs>
+  <circle cx="256" cy="256" r="256" fill="#ffffff"/>
+  <circle cx="256" cy="230" r="196" fill="none" stroke="url(#ring)" stroke-width="14"/>
+  <path d="M256 120c40 40 60 80 60 116a60 60 0 0 1-120 0c0-36 20-76 60-116z" fill="url(#leaf)"/>
+  <rect x="240" y="176" width="32" height="80" fill="#ffffff" rx="4"/>
+  <rect x="216" y="200" width="80" height="32" fill="#ffffff" rx="4"/>
+  <path d="M186 236c-30-8-58-30-70-58 34 0 66 14 88 40z" fill="url(#leaf)"/>
+  <path d="M326 236c30-8 58-30 70-58-34 0-66 14-88 40z" fill="url(#leaf)"/>
+  <path d="M256 236v90" stroke="#2f9e44" stroke-width="10" fill="none" stroke-linecap="round"/>
+  <path d="M228 336a28 28 0 0 0 56 0v-30h-56z" fill="none" stroke="#2f9e44" stroke-width="10"/>
+  <path d="M228 306v-30M284 306v-30" stroke="#2f9e44" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="284" cy="360" r="14" fill="none" stroke="#2f9e44" stroke-width="10"/>
+  <path d="M120 300c0 90 60 150 136 150s136-60 136-150" fill="none" stroke="url(#hand)" stroke-width="0"/>
+  <path d="M96 300c10 70 40 120 90 150 30 18 50 22 70 22s40-4 70-22c50-30 80-80 90-150-18 60-46 96-76 118-26 19-52 26-84 26s-58-7-84-26c-30-22-58-58-76-118z" fill="url(#hand)"/>
+  <path d="M120 460c40 24 92 24 136-6" fill="none" stroke="#2f9e44" stroke-width="10" stroke-linecap="round"/>
+</svg>
