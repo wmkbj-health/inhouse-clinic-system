@@ -199,8 +199,22 @@ export async function receiveBatch(companyId, drugId, payload) {
     company_id: companyId, drug_id: drugId, batch_id: row.id, tipe: 'masuk',
     qty: payload.qty, tanggal: payload.tanggal || todayStr(), keterangan: payload.keterangan || 'Penerimaan obat'
   }));
-  logActivity(companyId, 'receive_batch', 'drug_batches', row.id, { drugId, qty: payload.qty, noBatch: payload.noBatch });
+  await unwrap(await supabase.from('drug_receipts').insert({
+    company_id: companyId, drug_id: drugId, batch_id: row.id, tanggal: payload.tanggal || todayStr(),
+    jumlah: payload.qty, nama_penerima: payload.namaPenerima || '-', sumber: payload.supplier || null,
+    keterangan: payload.keterangan || null
+  }));
+  logActivity(companyId, 'receive_batch', 'drug_batches', row.id, { drugId, qty: payload.qty, noBatch: payload.noBatch, namaPenerima: payload.namaPenerima });
   return row;
+}
+
+// Riwayat penerimaan obat: quantity + recipient name for each stock receipt.
+export async function listDrugReceipts(fromDate, toDate) {
+  let q = supabase.from('drug_receipts').select('*, drugs(nama, kode, satuan)').order('tanggal', { ascending: false }).order('created_at', { ascending: false });
+  q = companyFilter(q);
+  if (fromDate) q = q.gte('tanggal', fromDate);
+  if (toDate) q = q.lte('tanggal', toDate);
+  return unwrap(await q);
 }
 
 // FEFO deduction: consumes earliest-expiry batches first. Returns line items
@@ -489,7 +503,15 @@ export async function exportSnapshot() {
 // ---------------- Print signatures (editable names shown on printed docs) ----------------
 export async function getPrintSignatures(companyId) {
   const { data } = await supabase.from('print_signatures').select('*').eq('company_id', companyId).maybeSingle();
-  return data || { company_id: companyId, nama_dokter: '', nama_apoteker: '', nama_admin_hrd: '' };
+  if (!data) return { company_id: companyId, signatures: [] };
+  if (data.signatures && data.signatures.length) return data;
+  // Back-compat: migrate old fixed nama_dokter/nama_apoteker/nama_admin_hrd fields into the new dynamic list.
+  const legacy = [
+    data.nama_dokter && { label: 'Dokter', nama: data.nama_dokter },
+    data.nama_apoteker && { label: 'Apoteker / Petugas Farmasi', nama: data.nama_apoteker },
+    data.nama_admin_hrd && { label: 'Admin/HRD', nama: data.nama_admin_hrd }
+  ].filter(Boolean);
+  return { ...data, signatures: legacy };
 }
 
 export async function savePrintSignatures(companyId, payload) {

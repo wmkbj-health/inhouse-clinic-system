@@ -28,7 +28,7 @@ export const COMPANY_ORDER = ['WSL', 'MTI', 'KMF', 'BIOS', 'JLA'];
 
 export function companyLogoUrl(codeOrCompany) {
   const code = (typeof codeOrCompany === 'string' ? codeOrCompany : codeOrCompany?.code || '').toLowerCase();
-  if (!code) return 'assets/icon.svg';
+  if (!code) return 'assets/app-icon.png';
   return `assets/logos/${code}.png`;
 }
 

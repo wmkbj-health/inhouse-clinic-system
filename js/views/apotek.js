@@ -20,6 +20,7 @@ export async function renderApotek(root) {
         <button class="btn btn-outline" id="btnRequest">Permintaan Obat</button>
         <button class="btn btn-outline" id="btnPrint">Cetak Stocktake</button>
         <button class="btn btn-outline" id="btnTx">Penerimaan Obat (Batch Baru)</button>
+        <button class="btn btn-outline" id="btnReceiptHistory">Riwayat Penerimaan</button>
         <button class="btn btn-primary" id="btnNewDrug">+ Tambah Item Obat/Alkes</button>
       </div>
     </div>
@@ -169,6 +170,13 @@ export async function renderApotek(root) {
 
   root.querySelector('#btnNewDrug').addEventListener('click', () => openDrugModal(null, loadAndDraw));
   root.querySelector('#btnTx').addEventListener('click', () => openReceiveModal(drugs, loadAndDraw));
+  root.querySelector('#btnReceiptHistory').addEventListener('click', () => {
+    const periodFrom = `${filterYear}-${String(filterMonth + 1).padStart(2, '0')}-01`;
+    const periodToDate = new Date(filterYear, filterMonth + 1, 0);
+    const isCurrentMonth = filterYear === now.getFullYear() && filterMonth === now.getMonth();
+    const periodTo = isCurrentMonth ? todayStr() : periodToDate.toISOString().slice(0, 10);
+    openReceiptHistoryModal(periodFrom, periodTo, `${MONTH_NAMES[filterMonth]} ${filterYear}`);
+  });
   root.querySelector('#btnRequest').addEventListener('click', () => openDrugRequestModal(drugs));
   root.querySelector('#btnSig').addEventListener('click', () => {
     const sel = getSelectedCompanyId();
@@ -336,6 +344,7 @@ function openReceiveModal(drugs, onDone) {
       <div class="field"><label>Harga Beli</label><input type="number" name="hargaBeli" min="0" value="0"></div>
       <div class="field"><label>Harga Jual</label><input type="number" name="hargaJual" min="0" value="0"></div>
       <div class="field full"><label>Supplier</label><input name="supplier"></div>
+      <div class="field full"><label>Nama Penerima *</label><input name="namaPenerima" required placeholder="Nama petugas yang menerima obat"></div>
       <div class="field full" style="display:flex;justify-content:flex-end;gap:8px">
         <button type="button" class="btn btn-outline" id="cancelBtn">Batal</button>
         <button type="submit" class="btn btn-primary" ${!companyId ? 'disabled' : ''}>Simpan Penerimaan</button>
@@ -352,7 +361,8 @@ function openReceiveModal(drugs, onDone) {
           await api.receiveBatch(companyId, fd.get('drugId'), {
             qty: Number(fd.get('qty')), noBatch: fd.get('noBatch').trim(), tanggal: fd.get('tanggal'),
             tanggalExpired: fd.get('tanggalExpired') || null, hargaBeli: Number(fd.get('hargaBeli')) || 0,
-            hargaJual: Number(fd.get('hargaJual')) || 0, supplier: fd.get('supplier').trim()
+            hargaJual: Number(fd.get('hargaJual')) || 0, supplier: fd.get('supplier').trim(),
+            namaPenerima: fd.get('namaPenerima').trim()
           });
           toast('Penerimaan obat tersimpan');
           close();
@@ -363,6 +373,24 @@ function openReceiveModal(drugs, onDone) {
       });
     }
   });
+}
+
+async function openReceiptHistoryModal(fromDate, toDate, periodLabel) {
+  const receipts = await api.listDrugReceipts(fromDate, toDate);
+  openModal(`Riwayat Penerimaan Obat — ${escapeHtml(periodLabel)}`, `
+    <div class="table-wrap"><table>
+      <thead><tr><th>Tanggal</th><th>Obat/Alkes</th><th>Jumlah</th><th>Nama Penerima</th><th>Sumber/Supplier</th></tr></thead>
+      <tbody>
+        ${receipts.length ? receipts.map(r => `<tr>
+          <td>${fmtDate(r.tanggal)}</td>
+          <td>${escapeHtml(r.drugs?.nama || '-')}</td>
+          <td>${r.jumlah} ${escapeHtml(r.drugs?.satuan || '')}</td>
+          <td>${escapeHtml(r.nama_penerima || '-')}</td>
+          <td>${escapeHtml(r.sumber || '-')}</td>
+        </tr>`).join('') : `<tr><td colspan="5" class="empty">Belum ada penerimaan obat pada periode ini.</td></tr>`}
+      </tbody>
+    </table></div>
+  `);
 }
 
 function openDrugRequestModal(drugs) {

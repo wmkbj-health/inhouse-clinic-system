@@ -14,7 +14,7 @@ export function renderLogin(root, onSuccess) {
     <div class="login-screen">
       <div class="login-card">
         <div class="login-brand">
-          <img src="assets/icon.svg" alt="Logo">
+          <img src="assets/app-icon.png" alt="Logo">
           <h1>Inhouse Clinic System</h1>
           <p>Klinik Digital Terpadu — Masuk untuk melanjutkan</p>
         </div>

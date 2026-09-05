@@ -41,6 +41,13 @@ function signBlock(items) {
   `).join('')}</div>`;
 }
 
+// Extra custom signature columns configured per-PT (Apotek > Nama Tanda Tangan),
+// appended after each document's own primary signer(s) so users control the
+// count/labels/names of signature columns freely.
+function extraSigners(sig) {
+  return (sig?.signatures || []).filter(s => s.label || s.nama).map(s => ({ label: s.label || 'Tanda Tangan', name: s.nama || '' }));
+}
+
 export function printReferral(r, patient, company, sig = {}) {
   openPrint(`Surat Rujukan - ${patient?.nama || ''}`, `
     ${letterhead(company, 'SURAT RUJUKAN PASIEN')}
@@ -61,7 +68,7 @@ export function printReferral(r, patient, company, sig = {}) {
       <tr><td class="label">Alasan &amp; Tujuan Rujukan</td><td>: Mohon evaluasi dan tatalaksana lebih lanjut sesuai indikasi</td></tr>
     </table>
     <p>Demikian surat rujukan ini dibuat untuk dapat ditindaklanjuti. Atas kerjasamanya kami ucapkan terima kasih.</p>
-    ${signBlock([{ label: 'Dokter Perujuk', name: r.dokter_perujuk || sig.nama_dokter }])}
+    ${signBlock([{ label: 'Dokter Perujuk', name: r.dokter_perujuk || '' }, ...extraSigners(sig)])}
   `);
 }
 
@@ -81,7 +88,7 @@ export function printSickNote(n, patient, company, sig = {}, includeDiagnosis = 
     <p style="text-align:center;font-weight:700;margin:14px 0">${fmtDate(n.tanggal_mulai)} sampai dengan ${fmtDate(n.tanggal_selesai)}</p>
     ${n.catatan ? `<p>Catatan: ${escapeHtml(n.catatan)}</p>` : ''}
     <p>Demikian surat keterangan ini dibuat dengan sebenarnya untuk dapat dipergunakan sebagaimana mestinya.</p>
-    ${signBlock([{ label: 'Dokter Pemeriksa', name: n.dokter || sig.nama_dokter }])}
+    ${signBlock([{ label: 'Dokter Pemeriksa', name: n.dokter || '' }, ...extraSigners(sig)])}
     <div class="tembusan">Tembusan: HRD ${escapeHtml(company?.name || '')}</div>
   `);
 }
@@ -197,7 +204,8 @@ export function printMedicalConsentForm(patient, company, type, form = {}, sig =
     ${signBlock([
       { label: 'Pasien / Wali', name: '' },
       { label: 'Saksi', name: form.namaSaksi },
-      { label: 'Petugas Medis', name: form.namaPetugas || sig.nama_dokter }
+      { label: 'Petugas Medis', name: form.namaPetugas || '' },
+      ...extraSigners(sig)
     ])}
   `);
 }
@@ -236,9 +244,9 @@ export function printStocktake(drugs, company, periodLabel, jenisLabel, sig = {}
         </tr>`).join('')}
       </tbody>
     </table>
-    ${signBlock([
-      { label: 'Dibuat oleh (Apoteker/Petugas)', name: sig.nama_apoteker },
-      { label: 'Diketahui oleh (Dokter)', name: sig.nama_dokter }
+    ${signBlock(extraSigners(sig).length ? extraSigners(sig) : [
+      { label: 'Dibuat oleh (Apoteker/Petugas)', name: '' },
+      { label: 'Diketahui oleh (Dokter)', name: '' }
     ])}
   `);
 }
@@ -259,8 +267,9 @@ export function printDrugRequest(request, drugItems, company, sig = {}) {
     </table>
     ${request.keterangan ? `<p>Catatan: ${escapeHtml(request.keterangan)}</p>` : ''}
     ${signBlock([
-      { label: 'Diminta oleh', name: request.diminta_oleh || sig.nama_apoteker },
-      { label: 'Disetujui oleh', name: request.disetujui_oleh || sig.nama_dokter }
+      { label: 'Diminta oleh', name: request.diminta_oleh || '' },
+      { label: 'Disetujui oleh', name: request.disetujui_oleh || '' },
+      ...extraSigners(sig)
     ])}
   `);
 }

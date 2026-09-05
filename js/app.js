@@ -45,7 +45,7 @@ function renderShell() {
     <div class="app">
       <aside class="sidebar" id="sidebar">
         <div class="brand">
-          <img src="assets/icon.svg" alt="Logo">
+          <img src="assets/app-icon.png" alt="Logo">
           <div><div class="name">Inhouse Clinic System</div><div class="sub">Klinik Digital Terpadu</div></div>
         </div>
         <div id="companyBadge"></div>
@@ -62,7 +62,7 @@ function renderShell() {
       </aside>
       <div class="main">
         <div class="topbar">
-          <div class="brand"><img src="assets/icon.svg" alt="Logo" style="width:30px;height:30px"><b>Inhouse Clinic System</b></div>
+          <div class="brand"><img src="assets/app-icon.png" alt="Logo" style="width:30px;height:30px"><b>Inhouse Clinic System</b></div>
           <div class="topbar-actions">
             <button class="notif-btn" id="notifBtn" aria-label="Notifikasi" hidden>&#128276;<span class="notif-dot" hidden></span></button>
             <button class="menu-btn" id="menuBtn" aria-label="Menu">&#9776;</button>
@@ -233,7 +233,28 @@ async function route() {
 boot();
 
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./service-worker.js').catch(() => {});
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (refreshing) return;
+    refreshing = true;
+    location.reload();
+  });
+  window.addEventListener('load', async () => {
+    try {
+      const reg = await navigator.serviceWorker.register('./service-worker.js');
+      reg.addEventListener('updatefound', () => {
+        const installing = reg.installing;
+        if (!installing) return;
+        installing.addEventListener('statechange', () => {
+          if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+            installing.postMessage('SKIP_WAITING');
+          }
+        });
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reg.update().catch(() => {});
+      });
+      setInterval(() => reg.update().catch(() => {}), 5 * 60 * 1000);
+    } catch (err) { /* SW unsupported or blocked; app still works without it */ }
   });
 }
