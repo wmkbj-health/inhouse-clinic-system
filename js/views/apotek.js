@@ -6,6 +6,31 @@ import { openSignatureModal } from '../signatures.js';
 
 const MONTH_NAMES = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 
+// Downscales+compresses a photo client-side before it's stored as a data
+// URI (no Supabase Storage bucket in this project, so attachments live in a
+// jsonb column) — a few full-resolution phone photos would otherwise bloat
+// that column and the page that has to load it.
+function downscaleImage(file, maxDim = 1280, quality = 0.72) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = () => {
+      img.onerror = reject;
+      img.onload = () => {
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 export async function renderApotek(root) {
   const now = new Date();
   let filterYear = now.getFullYear();
@@ -108,28 +133,40 @@ export async function renderApotek(root) {
   }
 
   const rows = root.querySelector('#drugRows');
+  // Grouped by golongan/kategori, sorted alphabetically both by kategori
+  // name and by item name within each kategori — a flat kode-ordered list
+  // made it hard to eyeball "what's in stock for X golongan".
   function drawRows(list) {
     if (!list.length) { rows.innerHTML = `<tr><td colspan="12" class="empty">Tidak ada data obat/alkes.</td></tr>`; return; }
-    rows.innerHTML = list.map(d => {
-      const st = statusOf(d);
-      return `<tr>
-        <td>${escapeHtml(d.kode)}</td>
-        <td>${escapeHtml(d.nama)}${d.nama_paten ? `<div class="muted" style="font-size:.72rem">${escapeHtml(d.nama_paten)}</div>` : ''}</td>
-        <td>${d.jenis}</td>
-        <td>${d.stokAwal ?? '-'}</td>
-        <td>${d.penerimaan}</td>
-        <td>${d.pemakaian}</td>
-        <td>${d.rataRata.toFixed(2)}</td>
-        <td>${d.stok} ${escapeHtml(d.satuan)}</td>
-        <td>${d.nextExpiry ? fmtDate(d.nextExpiry) : '-'}</td>
-        <td>Rp ${Number(d.hargaJual || 0).toLocaleString('id-ID')}</td>
-        <td><span class="badge ${st.cls}">${st.label}</span></td>
-        <td style="display:flex;gap:4px">
-          <button class="btn btn-sm btn-outline" data-batch="${d.id}">Batch</button>
-          <button class="btn btn-sm btn-outline" data-edit="${d.id}">Edit</button>
-          <button class="btn btn-sm btn-danger" data-hapus="${d.id}">Hapus</button>
-        </td>
-      </tr>`;
+    const byCategory = {};
+    for (const d of list) {
+      const cat = d.drug_categories?.name || 'Tanpa Kategori';
+      (byCategory[cat] = byCategory[cat] || []).push(d);
+    }
+    const categories = Object.keys(byCategory).sort((a, b) => a.localeCompare(b, 'id'));
+    rows.innerHTML = categories.map(cat => {
+      const items = byCategory[cat].sort((a, b) => a.nama.localeCompare(b.nama, 'id'));
+      return `<tr class="drug-cat-row"><td colspan="12"><b>${escapeHtml(cat.toUpperCase())}</b></td></tr>` + items.map(d => {
+        const st = statusOf(d);
+        return `<tr>
+          <td>${escapeHtml(d.kode)}</td>
+          <td>${escapeHtml(d.nama)}${d.nama_paten ? `<div class="muted" style="font-size:.72rem">${escapeHtml(d.nama_paten)}</div>` : ''}</td>
+          <td>${d.jenis}</td>
+          <td>${d.stokAwal ?? '-'}</td>
+          <td>${d.penerimaan}</td>
+          <td>${d.pemakaian}</td>
+          <td>${d.rataRata.toFixed(2)}</td>
+          <td>${d.stok} ${escapeHtml(d.satuan)}</td>
+          <td>${d.nextExpiry ? fmtDate(d.nextExpiry) : '-'}</td>
+          <td>Rp ${Number(d.hargaJual || 0).toLocaleString('id-ID')}</td>
+          <td><span class="badge ${st.cls}">${st.label}</span></td>
+          <td style="display:flex;gap:4px">
+            <button class="btn btn-sm btn-outline" data-batch="${d.id}">Batch</button>
+            <button class="btn btn-sm btn-outline" data-edit="${d.id}">Edit</button>
+            <button class="btn btn-sm btn-danger" data-hapus="${d.id}">Hapus</button>
+          </td>
+        </tr>`;
+      }).join('');
     }).join('');
     rows.querySelectorAll('[data-batch]').forEach(btn => btn.addEventListener('click', () => {
       openBatchModal(drugs.find(x => x.id === btn.dataset.batch), loadAndDraw);
@@ -209,12 +246,21 @@ function openStocktakePrintModal(drugs, filterMonth, filterYear) {
       const company = isAllCompanies() ? null : getCompanyById(getSelectedCompanyId());
       const sig = company ? await api.getPrintSignatures(company.id) : {};
       const periodLabel = `${['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'][filterMonth]} ${filterYear}`;
+      const now = new Date();
+      const periodFrom = `${filterYear}-${String(filterMonth + 1).padStart(2, '0')}-01`;
+      const periodToDate = new Date(filterYear, filterMonth + 1, 0);
+      const isCurrentMonth = filterYear === now.getFullYear() && filterMonth === now.getMonth();
+      const periodTo = isCurrentMonth ? todayStr() : periodToDate.toISOString().slice(0, 10);
+      const [batchStats, stocktakeDrugs] = await Promise.all([
+        api.batchPeriodStats(periodFrom, periodTo),
+        api.stocktakeBatches(periodTo)
+      ]);
       body.querySelector('#btnObat').addEventListener('click', () => {
-        printStocktake(drugs.filter(d => d.jenis === 'obat'), company, periodLabel, 'Obat', sig);
+        printStocktake(stocktakeDrugs.filter(d => d.jenis === 'obat'), company, periodLabel, 'Obat', sig, batchStats, isCurrentMonth);
         close();
       });
       body.querySelector('#btnAlkes').addEventListener('click', () => {
-        printStocktake(drugs.filter(d => d.jenis !== 'obat'), company, periodLabel, 'Alkes & BHP', sig);
+        printStocktake(stocktakeDrugs.filter(d => d.jenis !== 'obat'), company, periodLabel, 'Alkes & BHP', sig, batchStats, isCurrentMonth);
         close();
       });
     }
@@ -310,6 +356,12 @@ function openDrugModal(drug, onDone, drugs = []) {
         <select name="kategori_id" id="kategoriSelect"><option value="">-</option>${cats.map(c => `<option value="${c.id}" data-code="${escapeHtml(c.code)}" ${drug?.kategori_id === c.id ? 'selected' : ''}>${escapeHtml(c.name)} (${escapeHtml(c.code)})</option>`).join('')}</select>
       </div>
       <div class="field"><label>Satuan</label><input name="satuan" value="${escapeHtml(drug?.satuan || 'pcs')}"></div>
+      <div class="field"><label>Sediaan</label>
+        <select name="sediaan">
+          <option value="">-</option>
+          ${['Oral', 'Topikal', 'Injeksi', 'Tetes', 'Inhalasi', 'Suppositoria', 'Lainnya'].map(v => `<option value="${v}" ${drug?.sediaan === v ? 'selected' : ''}>${v}</option>`).join('')}
+        </select>
+      </div>
       <div class="field"><label>Stok Minimum (batas pesan ulang) *</label><input type="number" name="stok_minimum" min="0" value="${drug?.stok_minimum ?? 10}" required></div>
       <div class="field full" style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px">
         <button type="button" class="btn btn-outline" id="cancelBtn">Batal</button>
@@ -337,8 +389,19 @@ function openDrugModal(drug, onDone, drugs = []) {
         const payload = {
           nama: fd.get('nama').trim(), nama_paten: fd.get('nama_paten').trim() || null, jenis: fd.get('jenis'),
           kategori_id: fd.get('kategori_id') || null, satuan: fd.get('satuan').trim() || 'pcs',
+          sediaan: fd.get('sediaan') || null,
           stok_minimum: Number(fd.get('stok_minimum'))
         };
+        // Same name within the same kategori is almost always the same item
+        // registered twice by mistake — different expiry batches belong on
+        // ONE item via "Penerimaan Obat", not as separate master records.
+        // A same-named item in a DIFFERENT kategori (e.g. regular stock vs.
+        // a dedicated P3K kategori) is a deliberate, separately-tracked
+        // item, so that's not flagged.
+        if (!isEdit) {
+          const dup = drugs.find(d => d.nama.trim().toLowerCase() === payload.nama.toLowerCase() && d.kategori_id === payload.kategori_id);
+          if (dup && !confirmDialog(`"${dup.nama}" sudah ada di kategori ini (kode ${dup.kode}). Untuk menambah stok/batch baru dengan tanggal expired berbeda, gunakan "Penerimaan Obat" pada item yang sudah ada, bukan menambah item baru. Tetap buat item baru terpisah?`)) return;
+        }
         try {
           if (isEdit) {
             await api.updateDrug(drug.id, payload);
@@ -549,11 +612,35 @@ function openExpiryWriteoffModal(drugs, onDone) {
             <thead><tr><th></th><th>Item</th><th>No. Batch</th><th>Exp</th><th>Stok Tersisa</th><th>Jumlah Dimusnahkan</th></tr></thead>
             <tbody id="ewRows"></tbody>
           </table></div>
+
+          <div class="field full" style="margin-top:16px">
+            <label>Lampiran Foto (dokumentasi pemusnahan)</label>
+            <input type="file" id="ewPhotoInput" accept="image/*" multiple>
+            <div class="photo-gallery" id="ewGallery"></div>
+          </div>
+
           <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
             <button type="button" class="btn btn-outline" id="ewCancel">Batal</button>
             <button type="button" class="btn btn-primary" id="ewSave">Simpan & Cetak Berita Acara</button>
           </div>
         `;
+
+        const photos = [];
+        const galleryEl = ewBody.querySelector('#ewGallery');
+        function drawGallery() {
+          galleryEl.innerHTML = photos.map((src, i) => `
+            <div class="photo-thumb"><img src="${src}"><button type="button" data-i="${i}">&times;</button></div>
+          `).join('');
+          galleryEl.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { photos.splice(Number(b.dataset.i), 1); drawGallery(); }));
+        }
+        ewBody.querySelector('#ewPhotoInput').addEventListener('change', async e => {
+          const files = Array.from(e.target.files || []);
+          for (const file of files) {
+            try { photos.push(await downscaleImage(file)); } catch { /* skip unreadable file */ }
+          }
+          e.target.value = '';
+          drawGallery();
+        });
 
         const rowsEl = ewBody.querySelector('#ewRows');
         const jenisSelect = ewBody.querySelector('#ewJenis');
@@ -596,7 +683,8 @@ function openExpiryWriteoffModal(drugs, onDone) {
               jenis: jenisSelect.value, keterangan: ewBody.querySelector('#ewKet').value.trim() || null,
               dibuat_oleh: ewBody.querySelector('#ewDibuat').value.trim() || null,
               disaksikan_oleh: ewBody.querySelector('#ewSaksi').value.trim() || null,
-              dimusnahkan_oleh: ewBody.querySelector('#ewMusnah').value.trim() || null
+              dimusnahkan_oleh: ewBody.querySelector('#ewMusnah').value.trim() || null,
+              foto_urls: photos
             };
             await api.createExpiryWriteoff(payload, items);
             const company = getCompanyById(companyId);
@@ -615,10 +703,11 @@ function openExpiryWriteoffModal(drugs, onDone) {
         ewBody.innerHTML = `<div class="empty">Memuat...</div>`;
         const rows = await api.listExpiryWriteoffs();
         ewBody.innerHTML = rows.length ? `<div class="table-wrap"><table>
-          <thead><tr><th>No. Berita Acara</th><th>Tanggal</th><th>Jenis</th><th>Jumlah Item</th><th></th></tr></thead>
+          <thead><tr><th>No. Berita Acara</th><th>Tanggal</th><th>Jenis</th><th>Jumlah Item</th><th>Foto</th><th></th></tr></thead>
           <tbody>${rows.map(r => `<tr>
             <td>${escapeHtml(r.nomor_berita_acara)}</td><td>${fmtDate(r.tanggal)}</td><td>${escapeHtml(r.jenis)}</td>
             <td>${(r.expiry_writeoff_items || []).length}</td>
+            <td>${(r.foto_urls || []).length ? `<span class="badge badge-info">${r.foto_urls.length} foto</span>` : '<span class="muted">-</span>'}</td>
             <td><button class="btn btn-sm btn-outline" data-view="${r.id}">Lihat/Cetak</button></td>
           </tr>`).join('')}</tbody>
         </table></div>` : `<div class="empty">Belum ada Berita Acara Kadaluwarsa.</div>`;

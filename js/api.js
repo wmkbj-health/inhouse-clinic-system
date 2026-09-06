@@ -18,7 +18,7 @@ export async function loadReferenceData() {
     supabase.from('companies').select('*').order('name').then(unwrap),
     supabase.from('disease_categories').select('*').order('num').then(unwrap),
     supabase.from('disease_codes').select('*, disease_categories(num, name)').order('code').then(unwrap),
-    supabase.from('drug_categories').select('*').order('code').then(unwrap)
+    supabase.from('drug_categories').select('*').order('name').then(unwrap)
   ]);
   setCompanies(companies);
   setDiseaseCategories(cats);
@@ -62,6 +62,23 @@ export async function createPatient(payload) {
   const row = await unwrap(await supabase.from('patients').insert(payload).select().single());
   logActivity(payload.company_id, 'create_patient', 'patients', row.id, { nama: payload.nama, no_rm: payload.no_rm });
   return row;
+}
+
+// Looks for a likely-duplicate patient before registering a new one: same
+// NIK (a real duplicate, NIK is unique to a person), or same name + date of
+// birth (very likely the same person mistyped/re-registered). Returns the
+// existing row so the UI can show who it matched, or null if none found.
+export async function findDuplicatePatient(companyId, { nik, nama, tglLahir }) {
+  if (nik) {
+    const byNik = unwrap(await supabase.from('patients').select('id, nama, no_rm, nik, tgl_lahir').eq('company_id', companyId).eq('nik', nik).limit(1));
+    if (byNik.length) return byNik[0];
+  }
+  if (nama && tglLahir) {
+    const byNameDob = unwrap(await supabase.from('patients').select('id, nama, no_rm, nik, tgl_lahir')
+      .eq('company_id', companyId).eq('tgl_lahir', tglLahir).ilike('nama', nama).limit(1));
+    if (byNameDob.length) return byNameDob[0];
+  }
+  return null;
 }
 
 export async function getPatient(id) {
@@ -135,7 +152,7 @@ export async function stockAlerts() {
 
 // ---------------- Drugs / FEFO ----------------
 export async function listDrugsWithStock() {
-  const drugs = unwrap(await supabase.from('drugs').select('*, drug_categories(name)').order('kode'));
+  const drugs = unwrap(await supabase.from('drugs').select('*, drug_categories(name)').order('nama'));
   const sel = getSelectedCompanyId();
   let batchQ = supabase.from('drug_batches').select('*').gt('qty_sisa', 0).order('tanggal_expired', { ascending: true, nullsFirst: false });
   if (sel !== 'all') batchQ = batchQ.eq('company_id', sel);
@@ -168,6 +185,44 @@ export async function drugPeriodStats(fromDate, toDate) {
     else if (r.tipe === 'keluar') stats[r.drug_id].pemakaian += qty;
     else if (qty < 0) stats[r.drug_id].pemakaian += Math.abs(qty);
     else stats[r.drug_id].penerimaan += qty;
+  }
+  return stats;
+}
+
+// Every batch received on or before the period end — unlike
+// listDrugsWithStock() (which only returns batches with qty_sisa > 0, since
+// that list drives FEFO dispensing), a stocktake report needs to show
+// depleted/emptied batches too so the period's history reconciles.
+export async function stocktakeBatches(periodTo) {
+  const sel = getSelectedCompanyId();
+  let bq = supabase.from('drug_batches').select('*').lte('tanggal_terima', periodTo);
+  if (sel !== 'all') bq = bq.eq('company_id', sel);
+  const [batches, drugs] = await Promise.all([
+    unwrap(await bq),
+    unwrap(await supabase.from('drugs').select('*, drug_categories(name)').order('nama'))
+  ]);
+  return drugs.map(d => ({ ...d, batches: batches.filter(b => b.drug_id === d.id) }));
+}
+
+// Per-BATCH movement for a period (used by the per-batch stocktake report,
+// so two batches of the same drug with different expiry dates each get
+// their own accurate Stok Awal/Masuk/Keluar/Akhir instead of one merged
+// row). Reconciles fully: masuk includes positive koreksi, keluar includes
+// pemakaian pasien + pemusnahan kadaluarsa + negative koreksi, so
+// Stok Awal + Masuk - Keluar always equals Stok Akhir (qty_sisa).
+export async function batchPeriodStats(fromDate, toDate) {
+  const sel = getSelectedCompanyId();
+  let q = supabase.from('stock_transactions').select('batch_id, tipe, qty, tanggal').gte('tanggal', fromDate).lte('tanggal', toDate).not('batch_id', 'is', null);
+  if (sel !== 'all') q = q.eq('company_id', sel);
+  const rows = unwrap(await q);
+  const stats = {};
+  for (const r of rows) {
+    if (!stats[r.batch_id]) stats[r.batch_id] = { masuk: 0, keluar: 0 };
+    const qty = Number(r.qty);
+    if (r.tipe === 'masuk') stats[r.batch_id].masuk += qty;
+    else if (r.tipe === 'keluar' || r.tipe === 'kadaluarsa') stats[r.batch_id].keluar += qty;
+    else if (qty < 0) stats[r.batch_id].keluar += Math.abs(qty);
+    else stats[r.batch_id].masuk += qty;
   }
   return stats;
 }
@@ -366,6 +421,10 @@ export async function createReferral(payload) {
   logActivity(payload.company_id, 'create_referral', 'referrals', row.id, { patientId: payload.patient_id, faskesTujuan: payload.faskes_tujuan });
   return row;
 }
+export async function deleteReferral(id) {
+  await unwrap(await supabase.from('referrals').delete().eq('id', id));
+  logActivity(null, 'delete_referral', 'referrals', id, {});
+}
 
 export async function nextNomorSurat(companyId, prefix) {
   const { count } = await supabase.from('sick_notes').select('id', { count: 'exact', head: true }).eq('company_id', companyId);
@@ -382,6 +441,10 @@ export async function createSickNote(payload) {
   const row = await unwrap(await supabase.from('sick_notes').insert(payload).select().single());
   logActivity(payload.company_id, 'create_sick_note', 'sick_notes', row.id, { patientId: payload.patient_id, nomorSurat: payload.nomor_surat });
   return row;
+}
+export async function deleteSickNote(id) {
+  await unwrap(await supabase.from('sick_notes').delete().eq('id', id));
+  logActivity(null, 'delete_sick_note', 'sick_notes', id, {});
 }
 
 // ---------------- Dashboard KPI views ----------------

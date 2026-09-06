@@ -17,6 +17,13 @@ const BASE_STYLE = `
   .report-table th,.report-table td{border:1px solid #999;padding:5px 7px;font-size:.8rem}
   .report-table{border-collapse:collapse}
   .stocktake-cat td{background:#eef1f5}
+  .st-aman{background:#c8e6c9;font-weight:700;text-align:center}
+  .st-soon{background:#ffe0b2;font-weight:700;text-align:center}
+  .st-exp{background:#ffcdd2;font-weight:700;text-align:center}
+  .photo-print-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:10px}
+  .photo-print-grid figure{margin:0;border:1px solid #ccc;border-radius:8px;overflow:hidden;background:#fafafa}
+  .photo-print-grid img{width:100%;height:150px;object-fit:cover;display:block}
+  .photo-print-grid figcaption{text-align:center;font-size:.72rem;color:#555;padding:4px 0}
   .box{border:1px solid #999;padding:10px;border-radius:6px;margin:10px 0}
   .checkline{display:flex;gap:20px;margin:14px 0}
   .checkline label{display:flex;align-items:center;gap:6px;font-size:.9rem}
@@ -267,31 +274,58 @@ export function printDashboardReport(company, kpis, periodLabel) {
   `);
 }
 
-// Grouped by kategori (matching how this klinik's own monthly stocktake
-// workbook lays it out: a category header row, then its items numbered
-// underneath), with a free-text Keterangan column ("Kosong" auto-filled
-// when stock has run out, otherwise left blank for a handwritten note).
-export function printStocktake(drugs, company, periodLabel, jenisLabel, sig = {}) {
+// Status is computed purely from expiry, matching the klinik's own stock
+// report: sudah lewat -> KADALUWARSA, dalam 90 hari -> <3 BULAN, else AMAN.
+function expiryStatus(tanggalExpired) {
+  if (!tanggalExpired) return { label: 'AMAN', cls: 'st-aman' };
+  const days = Math.round((new Date(tanggalExpired) - new Date()) / 86400000);
+  if (days < 0) return { label: 'KADALUWARSA', cls: 'st-exp' };
+  if (days <= 90) return { label: '<3 BULAN', cls: 'st-soon' };
+  return { label: 'AMAN', cls: 'st-aman' };
+}
+
+// One row per BATCH (not per drug) grouped by kategori: two batches of the
+// same drug with different expiry dates are two separate, fully-reconciled
+// rows (Stok Awal + Masuk - Keluar = Stok Akhir), matching the klinik's
+// reference stock report format. isCurrentMonth controls whether Stok Awal
+// can be reverse-derived from today's qty_sisa (only valid for the month
+// still in progress — a past month's qty_sisa no longer reflects that
+// month's ending balance once later transactions have happened).
+export function printStocktake(drugs, company, periodLabel, jenisLabel, sig = {}, batchStats = {}, isCurrentMonth = true) {
   const byCategory = {};
   for (const d of drugs) {
     const cat = d.drug_categories?.name || 'Tanpa Kategori';
     (byCategory[cat] = byCategory[cat] || []).push(d);
   }
+  const categories = Object.keys(byCategory).sort((a, b) => a.localeCompare(b, 'id'));
   let no = 0;
-  const body = Object.entries(byCategory).map(([cat, items]) => `
-    <tr class="stocktake-cat"><td colspan="10"><b>${escapeHtml(cat.toUpperCase())}</b></td></tr>
-    ${items.map(d => { no++; return `<tr>
-      <td>${no}</td><td>${escapeHtml(d.nama)}${d.nama_paten ? ` <span style="color:#666">(${escapeHtml(d.nama_paten)})</span>` : ''}</td>
-      <td>${escapeHtml(d.satuan)}</td>
-      <td>${d.stokAwal ?? '-'}</td><td>${d.penerimaan ?? 0}</td><td>${d.pemakaian ?? 0}</td><td>${(d.rataRata ?? 0).toFixed(2)}</td>
-      <td>${d.stok}</td><td>${d.nextExpiry ? fmtDate(d.nextExpiry) : '-'}</td>
-      <td>${d.stok <= 0 ? 'Kosong' : d.stok <= d.stok_minimum ? 'Perlu Pesan Ulang' : ''}</td>
-    </tr>`; }).join('')}
-  `).join('');
+  const body = categories.map(cat => {
+    const items = byCategory[cat].sort((a, b) => a.nama.localeCompare(b.nama, 'id'));
+    const rowsHtml = items.flatMap(d => (d.batches.length ? d.batches : [null]).map(b => {
+      no++;
+      const stats = b ? (batchStats[b.id] || { masuk: 0, keluar: 0 }) : { masuk: 0, keluar: 0 };
+      const stokAkhir = b ? Number(b.qty_sisa) : 0;
+      const stokAwal = isCurrentMonth ? Math.max(0, stokAkhir - stats.masuk + stats.keluar) : null;
+      const st = expiryStatus(b?.tanggal_expired);
+      return `<tr>
+        <td>${no}</td><td>${escapeHtml(d.kode)}</td>
+        <td>${escapeHtml(d.nama)}${d.nama_paten ? ` <span style="color:#666">(${escapeHtml(d.nama_paten)})</span>` : ''}</td>
+        <td>${escapeHtml(d.satuan)}</td><td>${escapeHtml(d.sediaan || '-')}</td>
+        <td>Rp ${Number(b?.harga_jual || 0).toLocaleString('id-ID')}</td>
+        <td>${stokAwal ?? '-'}</td><td>${stats.masuk}</td><td>${stats.keluar}</td><td>${stokAkhir}</td>
+        <td>${d.stok_minimum}</td><td>${b?.tanggal_expired ? fmtDate(b.tanggal_expired) : '-'}</td>
+        <td class="${st.cls}">${st.label}</td>
+      </tr>`;
+    })).join('');
+    return `<tr class="stocktake-cat"><td colspan="13"><b>${escapeHtml(cat.toUpperCase())}</b></td></tr>${rowsHtml}`;
+  }).join('');
   openPrint(`Stocktake ${jenisLabel}`, `
     ${letterhead(company, `STOCKTAKE ${escapeHtml(jenisLabel.toUpperCase())} — ${escapeHtml(periodLabel)}`)}
     <table class="report-table">
-      <thead><tr><th>No</th><th>Item</th><th>Satuan</th><th>Stok Awal</th><th>Penerimaan</th><th>Pemakaian</th><th>Rata2/Bulan</th><th>Stok Aktual</th><th>Exp. Terdekat</th><th>Keterangan</th></tr></thead>
+      <thead><tr>
+        <th>No</th><th>Kode</th><th>Nama</th><th>Satuan</th><th>Sediaan</th><th>Harga Satuan</th>
+        <th>Stok Awal</th><th>Stok Masuk</th><th>Stok Keluar</th><th>Stok Akhir</th><th>Stok Minimum</th><th>Expired Date</th><th>Status</th>
+      </tr></thead>
       <tbody>${body}</tbody>
     </table>
     ${signBlock(extraSigners(sig, 'stocktake').length ? extraSigners(sig, 'stocktake') : [
@@ -342,6 +376,13 @@ export function printExpiryWriteoff(writeoff, company, sig = {}) {
     </table>
     ${writeoff.keterangan ? `<p>Keterangan/Cara Pemusnahan: ${escapeHtml(writeoff.keterangan)}</p>` : ''}
     <p>Stok item-item di atas telah dikurangi secara otomatis dari sistem apotek pada saat Berita Acara ini dibuat, sehingga tidak menimbulkan selisih stok di kemudian hari.</p>
+    ${(writeoff.foto_urls || []).length ? `
+      <div class="report-section">
+        <h3>Lampiran Dokumentasi Foto</h3>
+        <div class="photo-print-grid">
+          ${writeoff.foto_urls.map((src, i) => `<figure><img src="${src}"><figcaption>Dokumentasi ${i + 1}</figcaption></figure>`).join('')}
+        </div>
+      </div>` : ''}
     ${signBlock([
       { label: 'Dibuat oleh', name: writeoff.dibuat_oleh || '' },
       { label: 'Disaksikan oleh', name: writeoff.disaksikan_oleh || '' },
@@ -370,4 +411,50 @@ export function printRko(rows, company, year) {
       { label: 'Diketahui oleh (Dokter)', name: '' }
     ])}
   `);
+}
+
+const RESEP_STYLE = `
+  body{font-family:'Times New Roman',Times,serif;padding:40px;color:#111}
+  .resep-head{text-align:center;font-weight:700;line-height:1.5}
+  .resep-head .name{font-size:1.15rem}
+  .resep-rule{border:none;border-top:2px solid #111;margin:14px 0 22px}
+  .resep-date{text-align:right;margin-bottom:22px}
+  .resep-rx{font-size:2rem;font-style:italic;font-family:Georgia,serif;margin-bottom:18px}
+  .resep-lines{min-height:280px;font-size:1.02rem;line-height:2.2}
+  .resep-line b{display:inline-block;min-width:26px}
+  .resep-foot{margin-top:30px;font-size:.98rem}
+  .resep-foot .row{display:flex;gap:8px;margin-bottom:6px}
+  .resep-foot .row span:first-child{width:60px}
+  .resep-warn{text-align:center;font-weight:700;margin-top:26px}
+`;
+
+// Matches the klinik's own resep pad layout (dokter identity block, ruled
+// line, R/ symbol, prescription lines, Pro/Umur footer, the standard
+// "Obat jangan diganti tanpa ijin dokter" notice) — auto-printed right
+// after a SOAP visit that dispenses medication, so no one has to
+// hand-write a resep for something the system already just recorded.
+export function printResep(patient, dokter, obatLines) {
+  const win = window.open('', '_blank');
+  const tanggal = new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
+  win.document.write(`<html><head><title>Resep - ${escapeHtml(patient?.nama || '')}</title><style>${RESEP_STYLE}</style></head><body>
+    <div class="resep-head">
+      <div class="name">dr. ${escapeHtml(dokter.nama || '..........................')}</div>
+      <div>Praktik Mandiri</div>
+      <div>SIP : ${escapeHtml(dokter.sip || '..........................')}</div>
+      <div>${escapeHtml(dokter.alamat || '')}</div>
+    </div>
+    <hr class="resep-rule">
+    <div class="resep-date">${escapeHtml(dokter.kota || '..........................')}, ${tanggal}</div>
+    <div class="resep-rx">R/</div>
+    <div class="resep-lines">
+      ${obatLines.map(o => `<div class="resep-line">${escapeHtml(o.nama)} <b>No. ${o.qty}</b></div>`).join('') || ''}
+    </div>
+    <div class="resep-foot">
+      <div class="row"><span>Pro</span><span>: ${escapeHtml(patient?.nama || '')}</span></div>
+      <div class="row"><span>Umur</span><span>: ${patient ? fmtAge(patient.tgl_lahir) : ''}</span></div>
+    </div>
+    <div class="resep-warn">Obat jangan diganti tanpa ijin dokter</div>
+    <script>window.print()</script>
+  </body></html>`);
+  win.document.close();
 }

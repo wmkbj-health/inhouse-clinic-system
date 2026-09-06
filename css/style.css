@@ -87,23 +87,17 @@ body {
   animation: hazeBreathe 9s ease-in-out infinite;
 }
 @keyframes hazeBreathe { 0%, 100% { opacity: .85; } 50% { opacity: 1; } }
-/* Layered rows of industrial-plantation trees (HTI), far -> near for parallax depth,
-   swaying gently like a light breeze moving through the plantation */
-.login-screen::after {
-  content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0;
-  background-repeat: repeat-x, repeat-x, repeat-x;
-  background-position: bottom 34% left 0, bottom 14% left -60px, bottom -2% left 30px;
-  background-size: 700px auto, 560px auto, 480px auto;
-  background-image:
-    url('../assets/login-bg/trees-far.png'),
-    url('../assets/login-bg/trees-mid.png'),
-    url('../assets/login-bg/trees-near.png');
-  filter: saturate(1.05);
-  animation: treeSway 11s ease-in-out infinite;
-}
-@keyframes treeSway {
-  0%, 100% { background-position: bottom 34% left 0, bottom 14% left -60px, bottom -2% left 30px; }
-  50% { background-position: bottom 34% left 14px, bottom 14% left -46px, bottom -2% left 44px; }
+/* Animated Acacia mangium plantation (the actual HTI species these
+   companies grow), laid out as inline SVG in three parallax rows — see
+   acaciaForestSvg() in login.js. Each tree sways independently (its own
+   animation-delay) so the row reads as wind moving through the plantation
+   rather than the whole silhouette rocking as one rigid piece. */
+.login-bg-forest { position: absolute; left: 0; right: 0; bottom: 0; height: 40%; z-index: 0; pointer-events: none; width: 100%; }
+.acacia-layer[data-layer="0"] { filter: blur(1.5px); }
+.acacia-tree { animation-name: acaciaSway; animation-timing-function: ease-in-out; animation-iteration-count: infinite; }
+@keyframes acaciaSway {
+  0%, 100% { transform: rotate(-1.6deg); }
+  50% { transform: rotate(1.6deg); }
 }
 /* Sunlit floating particles (pollen/dust) drifting slowly upward */
 .login-bg-sparkle { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
@@ -126,7 +120,7 @@ body {
   100% { transform: translate(12px, -92vh); opacity: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .login-bg-sun, .cloud, .login-screen::before, .login-screen::after, .spark { animation: none !important; }
+  .login-bg-sun, .cloud, .login-screen::before, .acacia-tree, .spark { animation: none !important; }
 }
 .login-card {
   position: relative; z-index: 1; width: 100%; max-width: 400px;
@@ -314,6 +308,8 @@ tbody tr { transition: background .12s ease; }
 tbody tr:nth-child(even) { background: color-mix(in srgb, var(--surface-2) 45%, transparent); }
 tbody tr:hover { background: var(--surface-2); }
 tbody tr:last-child td { border-bottom: none; }
+.drug-cat-row td { background: var(--surface-3); color: var(--primary); }
+.drug-cat-row:hover td { background: var(--surface-3); }
 .empty { text-align: center; color: var(--muted); padding: 34px 10px; font-size: .88rem; }
 
 .loading-state {
@@ -372,6 +368,14 @@ tbody tr:last-child td { border-bottom: none; }
 .icd-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .icd-tag { display: flex; align-items: center; gap: 6px; background: var(--surface-3); border-radius: 20px; padding: 4px 10px 4px 12px; font-size: .78rem; }
 .icd-tag button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: .95rem; }
+
+.photo-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; margin-top: 10px; }
+.photo-thumb { position: relative; border-radius: 10px; overflow: hidden; box-shadow: var(--shadow); aspect-ratio: 1; background: var(--surface-2); }
+.photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.photo-thumb button {
+  position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(0,0,0,.6); color: #fff; border: none; cursor: pointer; font-size: .9rem; line-height: 1;
+}
 
 /* ---------- Print (surat) ---------- */
 .print-sheet { background: #fff; color: #111; padding: 32px; border-radius: 8px; max-width: 720px; margin: 0 auto; }

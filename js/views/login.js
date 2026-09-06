@@ -9,6 +9,44 @@ const COMPANY_LOGOS = [
   { code: 'JLA', name: 'PT Jelai Lestari Abadi' }
 ];
 
+// Acacia mangium plantation silhouette (the actual HTI species these
+// companies grow) as inline SVG rather than raster images, so the forest
+// can be laid out procedurally in three swaying parallax rows at any
+// screen width instead of one fixed-size tiled PNG per layer.
+function acaciaForestSvg() {
+  const layers = [
+    { count: 14, y: 190, minR: 22, maxR: 34, color: '#0c3f2c', opacity: 0.55, dur: 9 },
+    { count: 12, y: 220, minR: 30, maxR: 46, color: '#0f5236', opacity: 0.78, dur: 7.5 },
+    { count: 9, y: 255, minR: 42, maxR: 60, color: '#12613f', opacity: 1, dur: 6 }
+  ];
+  const width = 1600;
+  let seed = 42;
+  const rand = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+
+  const trees = layers.map((layer, li) => {
+    const spacing = width / layer.count;
+    const items = Array.from({ length: layer.count }, (_, i) => {
+      const cx = i * spacing + spacing * (0.3 + rand() * 0.4);
+      const r = layer.minR + rand() * (layer.maxR - layer.minR);
+      const trunkH = r * 0.9;
+      const delay = (rand() * layer.dur).toFixed(2);
+      return `
+        <g class="acacia-tree" style="transform-origin:${cx.toFixed(1)}px ${layer.y}px;animation-duration:${layer.dur}s;animation-delay:-${delay}s">
+          <rect x="${(cx - r * 0.045).toFixed(1)}" y="${layer.y - trunkH * 0.15}" width="${(r * 0.09).toFixed(1)}" height="${(trunkH * 1.15).toFixed(1)}" fill="#3b2a1a" opacity="${layer.opacity}"/>
+          <ellipse cx="${cx.toFixed(1)}" cy="${(layer.y - trunkH).toFixed(1)}" rx="${r.toFixed(1)}" ry="${(r * 0.62).toFixed(1)}" fill="${layer.color}" opacity="${layer.opacity}"/>
+          <ellipse cx="${(cx - r * 0.5).toFixed(1)}" cy="${(layer.y - trunkH * 0.8).toFixed(1)}" rx="${(r * 0.55).toFixed(1)}" ry="${(r * 0.4).toFixed(1)}" fill="${layer.color}" opacity="${layer.opacity * 0.92}"/>
+          <ellipse cx="${(cx + r * 0.5).toFixed(1)}" cy="${(layer.y - trunkH * 0.8).toFixed(1)}" rx="${(r * 0.55).toFixed(1)}" ry="${(r * 0.4).toFixed(1)}" fill="${layer.color}" opacity="${layer.opacity * 0.92}"/>
+        </g>`;
+    }).join('');
+    return `<g class="acacia-layer" data-layer="${li}">${items}</g>`;
+  }).join('');
+
+  return `
+    <svg class="login-bg-forest" viewBox="0 0 ${width} 300" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+      ${trees}
+    </svg>`;
+}
+
 export function renderLogin(root, onSuccess) {
   root.innerHTML = `
     <div class="login-screen">
@@ -19,6 +57,7 @@ export function renderLogin(root, onSuccess) {
       <div class="login-bg-sparkle">
         ${Array.from({ length: 14 }).map((_, i) => `<span class="spark s${i % 7}"></span>`).join('')}
       </div>
+      ${acaciaForestSvg()}
       <div class="login-card">
         <div class="login-brand">
           <img src="assets/app-icon.png" alt="Logo">

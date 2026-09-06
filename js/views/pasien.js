@@ -1,10 +1,25 @@
 import * as api from '../api.js';
 import { el, escapeHtml, fmtDate, toast, openModal, debounce, confirmDialog, todayStr } from '../util.js';
 import { getCompanies, getCompanyById, getSelectedCompanyId, isAllCompanies, getDiseaseCodes, fmtAge } from '../state.js';
-import { printPatientCard, printMedicalConsentForm } from '../print.js';
+import { printPatientCard, printMedicalConsentForm, printResep } from '../print.js';
 import { hasRole } from '../auth.js';
 import { VITAL_FIELDS, evaluateVitals, CHRONIC_DISEASE_OPTIONS } from '../clinical.js';
 import { openSignatureModal } from '../signatures.js';
+
+// Obat/alkes picker grouped by golongan (kategori), alphabetical within
+// each group — drugs are already fetched sorted by nama, so grouping here
+// only needs to preserve that order per category.
+function groupedDrugOptions(drugs) {
+  const byCategory = {};
+  for (const d of drugs) {
+    const cat = d.drug_categories?.name || 'Tanpa Kategori';
+    (byCategory[cat] = byCategory[cat] || []).push(d);
+  }
+  return Object.keys(byCategory).sort((a, b) => a.localeCompare(b, 'id')).map(cat => `
+    <optgroup label="${escapeHtml(cat)}">
+      ${byCategory[cat].map(d => `<option value="${d.id}" data-harga="${d.hargaJual}" data-stok="${d.stok}">${escapeHtml(d.nama)} (stok: ${d.stok})</option>`).join('')}
+    </optgroup>`).join('');
+}
 
 const STATUS_LABEL = { menunggu: 'Menunggu', diperiksa: 'Diperiksa', selesai: 'Selesai' };
 const STATUS_BADGE = { menunggu: 'badge-warn', diperiksa: 'badge-info', selesai: 'badge-ok' };
@@ -247,14 +262,23 @@ function openEditPatientModal(patient, onDone) {
           <option value="P" ${patient.jenis_kelamin === 'P' ? 'selected' : ''}>Perempuan</option>
         </select>
       </div>
+      <div class="field"><label>Status Pernikahan</label>
+        <select name="status_pernikahan">
+          ${['Belum Kawin', 'Kawin', 'Cerai'].map(v => `<option value="${v}" ${patient.status_pernikahan === v ? 'selected' : ''}>${v}</option>`).join('')}
+        </select>
+      </div>
       <div class="field full"><label>Alamat / Tempat Tinggal</label><input name="tempat_tinggal" value="${escapeHtml(patient.tempat_tinggal || '')}"></div>
       <div class="field"><label>No. HP</label><input name="no_hp" value="${escapeHtml(patient.no_hp || '')}"></div>
       <div class="field"><label>Jabatan / Pekerjaan</label><input name="jabatan" value="${escapeHtml(patient.jabatan || '')}"></div>
       <div class="field"><label>Departemen</label><input name="departemen" value="${escapeHtml(patient.departemen || '')}"></div>
       <div class="field"><label>Status Pegawai *</label>
-        <select name="status_pegawai" required>
+        <select name="status_pegawai" id="editStatusPegawai" required>
           ${Object.entries(STATUS_PEGAWAI_LABEL).map(([v, l]) => `<option value="${v}" ${patient.status_pegawai === v ? 'selected' : ''}>${l}</option>`).join('')}
         </select>
+      </div>
+      <div id="editMitraBlock" class="grid cols-2" style="grid-column:1/-1;display:${patient.status_pegawai === 'mitra_kerja' ? 'grid' : 'none'}">
+        <div class="field"><label>Nama PT Mitra</label><input name="nama_pt_mitra" value="${escapeHtml(patient.nama_pt_mitra || '')}"></div>
+        <div class="field"><label>Lokasi Kerja / Asal</label><input name="lokasi_kerja" value="${escapeHtml(patient.lokasi_kerja || '')}"></div>
       </div>
       ${diseaseHistoryFieldHtml(patient.riwayat_kronis || [], 'editPatRiwayat')}
       <div class="field full" style="display:flex;justify-content:flex-end;gap:8px">
@@ -266,15 +290,21 @@ function openEditPatientModal(patient, onDone) {
     onMount: (body, close) => {
       const riwayatField = bindDiseaseHistoryField(body, 'editPatRiwayat');
       body.querySelector('#cancelBtn').addEventListener('click', close);
+      body.querySelector('#editStatusPegawai').addEventListener('change', e => {
+        body.querySelector('#editMitraBlock').style.display = e.target.value === 'mitra_kerja' ? 'grid' : 'none';
+      });
       body.querySelector('#editPatientForm').addEventListener('submit', async e => {
         e.preventDefault();
         const fd = new FormData(e.target);
         try {
           await api.updatePatient(patient.id, {
             nama: fd.get('nama').trim(), nik: fd.get('nik').trim() || null, tgl_lahir: fd.get('tgl_lahir'),
-            jenis_kelamin: fd.get('jenis_kelamin'), tempat_tinggal: fd.get('tempat_tinggal').trim(),
+            jenis_kelamin: fd.get('jenis_kelamin'), status_pernikahan: fd.get('status_pernikahan'),
+            tempat_tinggal: fd.get('tempat_tinggal').trim(),
             no_hp: fd.get('no_hp').trim(), jabatan: fd.get('jabatan').trim(), departemen: fd.get('departemen').trim(),
-            status_pegawai: fd.get('status_pegawai'), riwayat_kronis: riwayatField.getValues()
+            status_pegawai: fd.get('status_pegawai'),
+            nama_pt_mitra: fd.get('nama_pt_mitra')?.trim() || null, lokasi_kerja: fd.get('lokasi_kerja')?.trim() || null,
+            riwayat_kronis: riwayatField.getValues()
           });
           toast('Data pasien diperbarui');
           close();
@@ -322,7 +352,7 @@ function openNewPatientModal(onDone) {
           <option value="masyarakat">Masyarakat / Umum</option>
         </select>
       </div>
-      <div id="mitraBlock" style="display:none" class="grid cols-2" style="grid-column:1/-1">
+      <div id="mitraBlock" class="grid cols-2" style="grid-column:1/-1;display:none">
         <div class="field"><label>Nama PT Mitra</label><input name="nama_pt_mitra"></div>
         <div class="field"><label>Lokasi Kerja / Asal</label><input name="lokasi_kerja"></div>
       </div>
@@ -347,6 +377,11 @@ function openNewPatientModal(onDone) {
         e.preventDefault();
         const fd = new FormData(e.target);
         const companyId = fd.get('company_id');
+        const nama = fd.get('nama').trim();
+        const nik = fd.get('nik').trim() || null;
+        const tgl_lahir = fd.get('tgl_lahir');
+        const dup = await api.findDuplicatePatient(companyId, { nik, nama, tglLahir: tgl_lahir });
+        if (dup && !confirmDialog(`Sudah ada pasien dengan data serupa: ${dup.nama} (No. RM ${dup.no_rm}${dup.nik ? `, NIK ${dup.nik}` : ''}). Tetap daftarkan sebagai pasien baru?`)) return;
         const no_rm = await api.nextRmNumber(companyId);
         try {
           const patient = await api.createPatient({
@@ -485,7 +520,7 @@ async function openSoapModal(queueItem, onDone) {
       <div class="field full">
         <label>Obat / Alkes Diberikan (FEFO otomatis)</label>
         <div style="display:flex;gap:8px;margin-bottom:8px">
-          <select id="obatPick" style="flex:2">${drugs.map(d => `<option value="${d.id}" data-harga="${d.hargaJual}" data-stok="${d.stok}">${escapeHtml(d.nama)} (stok: ${d.stok})</option>`).join('') || '<option value="">Belum ada data obat</option>'}</select>
+          <select id="obatPick" style="flex:2">${groupedDrugOptions(drugs) || '<option value="">Belum ada data obat</option>'}</select>
           <input type="number" id="obatQty" min="1" value="1" style="flex:1">
           <button type="button" class="btn btn-outline btn-sm" id="obatAddBtn">+ Tambah</button>
         </div>
@@ -494,6 +529,12 @@ async function openSoapModal(queueItem, onDone) {
       </div>
 
       <div class="field full"><label>Dokter / Petugas Pemeriksa</label><input name="dokter"></div>
+
+      <div class="grid cols-3" id="resepInfoBlock" style="display:none">
+        <div class="field"><label>SIP Dokter (untuk resep)</label><input name="resepSip"></div>
+        <div class="field"><label>Kota (untuk resep)</label><input name="resepKota"></div>
+        <div class="field"><label>Alamat Praktik (untuk resep)</label><input name="resepAlamat"></div>
+      </div>
 
       <div class="field full" style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px">
         <button type="button" class="btn btn-outline" id="cancelBtn">Batal</button>
@@ -596,8 +637,15 @@ async function openSoapModal(queueItem, onDone) {
         }).join('') || `<tr><td colspan="4" class="empty">Belum ada obat ditambahkan</td></tr>`;
         totalBiaya.textContent = 'Rp ' + total.toLocaleString('id-ID');
         obatRows.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { obatSelected.splice(Number(b.dataset.i), 1); drawObat(); }));
+        body.querySelector('#resepInfoBlock').style.display = obatSelected.length ? 'grid' : 'none';
       }
       drawObat();
+      try {
+        const resepInfo = JSON.parse(localStorage.getItem('resepDokterInfo') || '{}');
+        body.querySelector('[name=resepSip]').value = resepInfo.sip || '';
+        body.querySelector('[name=resepKota]').value = resepInfo.kota || '';
+        body.querySelector('[name=resepAlamat]').value = resepInfo.alamat || '';
+      } catch { /* first use, or storage blocked — start blank */ }
 
       body.querySelector('#obatAddBtn').addEventListener('click', () => {
         const sel = body.querySelector('#obatPick');
@@ -655,6 +703,16 @@ async function openSoapModal(queueItem, onDone) {
           }
 
           toast(`Pemeriksaan tersimpan. Total biaya: Rp ${Number(visit.biaya_total || 0).toLocaleString('id-ID')}`);
+
+          if (obatSelected.length) {
+            const dokterInfo = {
+              nama: fd.get('dokter').trim(), sip: fd.get('resepSip').trim(),
+              kota: fd.get('resepKota').trim(), alamat: fd.get('resepAlamat').trim()
+            };
+            try { localStorage.setItem('resepDokterInfo', JSON.stringify({ sip: dokterInfo.sip, kota: dokterInfo.kota, alamat: dokterInfo.alamat })); } catch { /* storage blocked, not critical */ }
+            printResep(patient, dokterInfo, obatSelected.map(o => ({ nama: o.nama, qty: o.qty })));
+          }
+
           close();
           onDone();
         } catch (err) {

@@ -1,5 +1,5 @@
 import * as api from '../api.js';
-import { escapeHtml, fmtDate, toast, openModal, mountPatientPicker, todayStr } from '../util.js';
+import { escapeHtml, fmtDate, toast, openModal, mountPatientPicker, todayStr, confirmDialog } from '../util.js';
 import { printReferral } from '../print.js';
 import { openSignatureModal } from '../signatures.js';
 import { getSelectedCompanyId } from '../state.js';
@@ -35,13 +35,27 @@ export async function renderRujukan(root) {
         <td>${escapeHtml(r.patients?.nama || '(pasien dihapus)')}</td>
         <td>${escapeHtml(r.faskes_tujuan)}</td>
         <td>${escapeHtml(r.diagnosa)}</td>
-        <td><button class="btn btn-sm btn-outline" data-print="${r.id}">Cetak</button></td>
+        <td style="display:flex;gap:6px">
+          <button class="btn btn-sm btn-outline" data-print="${r.id}">Cetak</button>
+          <button class="btn btn-sm btn-danger" data-hapus="${r.id}">Hapus</button>
+        </td>
       </tr>`).join('');
     rows.querySelectorAll('[data-print]').forEach(btn => btn.addEventListener('click', async () => {
       const r = referrals.find(x => x.id === btn.dataset.print);
       const patient = await api.getPatient(r.patient_id);
       const sig = await api.getPrintSignatures(r.company_id);
       printReferral(r, patient, patient.companies, sig);
+    }));
+    rows.querySelectorAll('[data-hapus]').forEach(btn => btn.addEventListener('click', async () => {
+      const r = referrals.find(x => x.id === btn.dataset.hapus);
+      if (!confirmDialog(`Hapus data rujukan ${r.patients?.nama || ''} ke ${r.faskes_tujuan}?`)) return;
+      try {
+        await api.deleteReferral(r.id);
+        toast('Data rujukan dihapus');
+        renderRujukan(root);
+      } catch (err) {
+        toast(err.message || 'Gagal menghapus rujukan', 'err');
+      }
     }));
   }
 
