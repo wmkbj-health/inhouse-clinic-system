@@ -6,6 +6,8 @@ import { hasRole } from '../auth.js';
 import { lineChart, barChart, pieChart } from '../charts.js';
 
 const STATUS_PEGAWAI_LABEL = { karyawan_tetap: 'Karyawan Tetap', karyawan_kontrak: 'Karyawan Kontrak', mitra_kerja: 'Mitra Kerja', masyarakat: 'Masyarakat/Umum' };
+const JENIS_KUNJUNGAN_LABEL = { sakit: 'Sakit', kecelakaan_kerja: 'Kecelakaan Kerja', kontrol: 'Kontrol', vitamin_mcu: 'Vitamin/MCU/Minta Obat' };
+const DISPOSISI_LABEL = { rawat_jalan: 'Rawat Jalan', observasi: 'Observasi', rawat_inap: 'Rawat Inap', rujuk_keluar: 'Rujuk Keluar' };
 
 export async function renderDashboard(root) {
   const now = new Date();
@@ -28,6 +30,10 @@ export async function renderDashboard(root) {
     <div class="grid cols-2">
       <div class="panel"><h2>Top Five Disease (Grafik)</h2><div id="chartDiseases"></div></div>
       <div class="panel"><h2>Kecelakaan Kerja per Tingkat</h2><div id="chartKk"></div></div>
+    </div>
+    <div class="grid cols-2">
+      <div class="panel"><h2>Jenis Kasus Pasien</h2><div id="chartJenis"></div></div>
+      <div class="panel"><h2>Disposisi Pasien</h2><div id="chartDisposisi"></div></div>
     </div>
     <div class="grid cols-2">
       <div class="panel"><h2>Antrian Hari Ini</h2><div id="queuePreview"></div></div>
@@ -82,6 +88,13 @@ export async function renderDashboard(root) {
       ['FA', 'MA', 'LTI'].map(t => ({ label: t, value: kpis.kk.find(k => k.tingkat === t)?.jumlah || 0 }))
     );
 
+    root.querySelector('#chartJenis').innerHTML = pieChart(
+      Object.entries(JENIS_KUNJUNGAN_LABEL).map(([k, label]) => ({ label, value: kpis.jenisKunjungan?.[k] || 0 }))
+    );
+    root.querySelector('#chartDisposisi').innerHTML = pieChart(
+      Object.entries(DISPOSISI_LABEL).map(([k, label]) => ({ label, value: kpis.disposisi?.[k] || 0 }))
+    );
+
     const queuePreview = root.querySelector('#queuePreview');
     queuePreview.innerHTML = queue.length ? queue.slice(0, 6).map(q => `
       <div class="list-row">
@@ -111,7 +124,7 @@ export async function renderDashboard(root) {
     const maxDisease = Math.max(1, ...top5Diseases.map(d => d.jumlah));
     root.querySelector('#topDiseases').innerHTML = top5Diseases.length ? top5Diseases.map((d, i) => rankBar(i, d.penyakit, d.kode, d.jumlah, maxDisease)).join('') : `<div class="empty">Belum ada data.</div>`;
     root.querySelector('#chartDiseases').innerHTML = top5Diseases.length
-      ? barChart(top5Diseases.map(d => ({ label: d.kode, value: d.jumlah })))
+      ? barChart(top5Diseases.map(d => ({ label: `${d.kode} — ${d.penyakit}`, value: d.jumlah })))
       : `<div class="empty">Belum ada data.</div>`;
 
     const drugMap = {};
@@ -175,7 +188,11 @@ export async function renderDashboard(root) {
       totalSks: lastKpis.sks.reduce((s, r) => s + r.total_sks, 0),
       totalRujukan: lastKpis.rujukan.reduce((s, r) => s + r.total_rujukan, 0),
       totalKk: lastKpis.kk.reduce((s, r) => s + r.jumlah, 0),
-      topDiseases: top5Diseases, topDrugs: top10Drugs
+      topDiseases: top5Diseases, topDrugs: top10Drugs,
+      kunjunganBulanan: lastKpis.kunjunganBulanan || [],
+      kk: lastKpis.kk || [],
+      jenisKunjungan: Object.entries(JENIS_KUNJUNGAN_LABEL).map(([k, label]) => ({ label, value: lastKpis.jenisKunjungan?.[k] || 0 })),
+      disposisi: Object.entries(DISPOSISI_LABEL).map(([k, label]) => ({ label, value: lastKpis.disposisi?.[k] || 0 }))
     }, lastYearLabel);
   });
 }

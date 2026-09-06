@@ -1,7 +1,7 @@
 import * as api from '../api.js';
 import { escapeHtml, fmtDate, toast, openModal, debounce, todayStr, confirmDialog } from '../util.js';
 import { getDrugCategories, getSelectedCompanyId, isAllCompanies, getCompanyById, consumePendingApotekFilter } from '../state.js';
-import { printStocktake, printDrugRequest } from '../print.js';
+import { printStocktake, printDrugRequest, printExpiryWriteoff, printRko } from '../print.js';
 import { openSignatureModal } from '../signatures.js';
 
 const MONTH_NAMES = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
@@ -18,9 +18,11 @@ export async function renderApotek(root) {
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-outline" id="btnSig">Nama Tanda Tangan</button>
         <button class="btn btn-outline" id="btnRequest">Permintaan Obat</button>
+        <button class="btn btn-outline" id="btnRko">RKO</button>
         <button class="btn btn-outline" id="btnPrint">Cetak Stocktake</button>
         <button class="btn btn-outline" id="btnTx">Penerimaan Obat (Batch Baru)</button>
         <button class="btn btn-outline" id="btnReceiptHistory">Riwayat Penerimaan</button>
+        <button class="btn btn-outline" id="btnExpiryWriteoff">Berita Acara Kadaluwarsa</button>
         <button class="btn btn-primary" id="btnNewDrug">+ Tambah Item Obat/Alkes</button>
       </div>
     </div>
@@ -133,7 +135,7 @@ export async function renderApotek(root) {
       openBatchModal(drugs.find(x => x.id === btn.dataset.batch), loadAndDraw);
     }));
     rows.querySelectorAll('[data-edit]').forEach(btn => btn.addEventListener('click', () => {
-      openDrugModal(drugs.find(x => x.id === btn.dataset.edit), loadAndDraw);
+      openDrugModal(drugs.find(x => x.id === btn.dataset.edit), loadAndDraw, drugs);
     }));
     rows.querySelectorAll('[data-hapus]').forEach(btn => btn.addEventListener('click', async () => {
       const d = drugs.find(x => x.id === btn.dataset.hapus);
@@ -168,7 +170,7 @@ export async function renderApotek(root) {
   monthSel.addEventListener('change', () => { filterMonth = Number(monthSel.value); loadAndDraw(); });
   yearSel.addEventListener('change', () => { filterYear = Number(yearSel.value); loadAndDraw(); });
 
-  root.querySelector('#btnNewDrug').addEventListener('click', () => openDrugModal(null, loadAndDraw));
+  root.querySelector('#btnNewDrug').addEventListener('click', () => openDrugModal(null, loadAndDraw, drugs));
   root.querySelector('#btnTx').addEventListener('click', () => openReceiveModal(drugs, loadAndDraw));
   root.querySelector('#btnReceiptHistory').addEventListener('click', () => {
     const periodFrom = `${filterYear}-${String(filterMonth + 1).padStart(2, '0')}-01`;
@@ -183,6 +185,8 @@ export async function renderApotek(root) {
     openSignatureModal(sel === 'all' ? null : sel, 'stocktake');
   });
   root.querySelector('#btnPrint').addEventListener('click', () => openStocktakePrintModal(drugs, filterMonth, filterYear));
+  root.querySelector('#btnExpiryWriteoff').addEventListener('click', () => openExpiryWriteoffModal(drugs, loadAndDraw));
+  root.querySelector('#btnRko').addEventListener('click', () => openRkoModal(drugs));
 
   await loadAndDraw();
 
@@ -273,12 +277,26 @@ function openAdjustModal(drug, batchId, onDone) {
   });
 }
 
-function openDrugModal(drug, onDone) {
+// Next free code for a category: {kode prefix}{3-digit sequence}, continuing
+// from whatever is already in use for that category (e.g. AB007 exists ->
+// suggests AB008) rather than always starting at 001.
+function nextDrugCode(categoryCode, drugs) {
+  if (!categoryCode) return '';
+  const prefix = categoryCode.toUpperCase();
+  let max = 0;
+  for (const d of drugs) {
+    const m = /^([A-Z]+)(\d+)$/.exec((d.kode || '').toUpperCase());
+    if (m && m[1] === prefix) max = Math.max(max, Number(m[2]));
+  }
+  return `${prefix}${String(max + 1).padStart(3, '0')}`;
+}
+
+function openDrugModal(drug, onDone, drugs = []) {
   const cats = getDrugCategories();
   const isEdit = !!drug;
   openModal(isEdit ? 'Edit Item Obat/Alkes' : 'Tambah Item Obat/Alkes', `
     <form id="drugForm" class="form-grid">
-      <div class="field"><label>Kode *</label><input name="kode" required placeholder="mis. AB020" value="${escapeHtml(drug?.kode || '')}" ${isEdit ? 'disabled' : ''}></div>
+      <div class="field"><label>Kode ${isEdit ? '' : '(otomatis sesuai kategori, bisa diubah)'}</label><input name="kode" required placeholder="Pilih kategori dahulu, atau isi manual" value="${escapeHtml(drug?.kode || '')}" ${isEdit ? 'disabled' : ''}></div>
       <div class="field"><label>Nama Generik *</label><input name="nama" required value="${escapeHtml(drug?.nama || '')}"></div>
       <div class="field full"><label>Nama Paten / Brand (opsional)</label><input name="nama_paten" placeholder="mis. Panadol, Sanmol, dsb." value="${escapeHtml(drug?.nama_paten || '')}"></div>
       <div class="field"><label>Jenis *</label>
@@ -289,7 +307,7 @@ function openDrugModal(drug, onDone) {
         </select>
       </div>
       <div class="field"><label>Kategori</label>
-        <select name="kategori_id"><option value="">-</option>${cats.map(c => `<option value="${c.id}" ${drug?.kategori_id === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}</select>
+        <select name="kategori_id" id="kategoriSelect"><option value="">-</option>${cats.map(c => `<option value="${c.id}" data-code="${escapeHtml(c.code)}" ${drug?.kategori_id === c.id ? 'selected' : ''}>${escapeHtml(c.name)} (${escapeHtml(c.code)})</option>`).join('')}</select>
       </div>
       <div class="field"><label>Satuan</label><input name="satuan" value="${escapeHtml(drug?.satuan || 'pcs')}"></div>
       <div class="field"><label>Stok Minimum (batas pesan ulang) *</label><input type="number" name="stok_minimum" min="0" value="${drug?.stok_minimum ?? 10}" required></div>
@@ -300,6 +318,18 @@ function openDrugModal(drug, onDone) {
     </form>
   `, {
     onMount: (body, close) => {
+      if (!isEdit) {
+        const kodeInput = body.querySelector('[name=kode]');
+        let lastAuto = '';
+        body.querySelector('#kategoriSelect').addEventListener('change', e => {
+          const opt = e.target.selectedOptions[0];
+          const suggestion = nextDrugCode(opt?.dataset.code, drugs);
+          if (!kodeInput.value.trim() || kodeInput.value.trim() === lastAuto) {
+            kodeInput.value = suggestion;
+            lastAuto = suggestion;
+          }
+        });
+      }
       body.querySelector('#cancelBtn').addEventListener('click', close);
       body.querySelector('#drugForm').addEventListener('submit', async e => {
         e.preventDefault();
@@ -458,6 +488,212 @@ function openDrugRequestModal(drugs) {
         } catch (err) {
           toast(err.message || 'Gagal menyimpan permintaan', 'err');
         }
+      });
+    }
+  });
+}
+
+// ---------------- Berita Acara Kadaluwarsa (expiry write-off) ----------------
+function openExpiryWriteoffModal(drugs, onDone) {
+  const sel = getSelectedCompanyId();
+  const companyId = sel === 'all' ? null : sel;
+  let activeTab = 'baru';
+
+  openModal('Berita Acara Kadaluwarsa Obat/Alkes', `
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <button type="button" class="btn btn-outline" id="tabBaruBtn">Buat Baru</button>
+      <button type="button" class="btn btn-outline" id="tabRiwayatBtn">Riwayat</button>
+    </div>
+    <div id="ewBody"></div>
+  `, {
+    onMount: (body, close) => {
+      const ewBody = body.querySelector('#ewBody');
+      const tabBaruBtn = body.querySelector('#tabBaruBtn');
+      const tabRiwayatBtn = body.querySelector('#tabRiwayatBtn');
+
+      function setTab(tab) {
+        activeTab = tab;
+        tabBaruBtn.classList.toggle('btn-primary', tab === 'baru');
+        tabBaruBtn.classList.toggle('btn-outline', tab !== 'baru');
+        tabRiwayatBtn.classList.toggle('btn-primary', tab === 'riwayat');
+        tabRiwayatBtn.classList.toggle('btn-outline', tab !== 'riwayat');
+        if (tab === 'baru') drawForm(); else drawHistory();
+      }
+      tabBaruBtn.addEventListener('click', () => setTab('baru'));
+      tabRiwayatBtn.addEventListener('click', () => setTab('riwayat'));
+
+      function drawForm() {
+        if (!companyId) { ewBody.innerHTML = `<p class="desc">Pilih PT terlebih dahulu di sidebar (tidak bisa "Semua PT") untuk membuat Berita Acara.</p>`; return; }
+        const today = new Date();
+        const expiredLines = [];
+        drugs.forEach(d => {
+          (d.batches || []).forEach(b => {
+            if (b.tanggal_expired && new Date(b.tanggal_expired) < today && Number(b.qty_sisa) > 0) {
+              expiredLines.push({ drug: d, batch: b });
+            }
+          });
+        });
+
+        ewBody.innerHTML = `
+          <div class="grid cols-3" style="margin-bottom:14px">
+            <div class="field"><label>Jenis *</label>
+              <select id="ewJenis"><option value="obat">Obat</option><option value="alkes">Alat Kesehatan</option><option value="bhp">BHP</option></select>
+            </div>
+            <div class="field"><label>Tanggal *</label><input type="date" id="ewTanggal" value="${todayStr()}"></div>
+            <div class="field"><label>Dibuat oleh</label><input id="ewDibuat" placeholder="Apoteker/Petugas"></div>
+            <div class="field"><label>Disaksikan oleh</label><input id="ewSaksi"></div>
+            <div class="field"><label>Dimusnahkan oleh</label><input id="ewMusnah"></div>
+            <div class="field"><label>Keterangan</label><input id="ewKet" placeholder="mis. cara pemusnahan"></div>
+          </div>
+          <div class="table-wrap"><table>
+            <thead><tr><th></th><th>Item</th><th>No. Batch</th><th>Exp</th><th>Stok Tersisa</th><th>Jumlah Dimusnahkan</th></tr></thead>
+            <tbody id="ewRows"></tbody>
+          </table></div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+            <button type="button" class="btn btn-outline" id="ewCancel">Batal</button>
+            <button type="button" class="btn btn-primary" id="ewSave">Simpan & Cetak Berita Acara</button>
+          </div>
+        `;
+
+        const rowsEl = ewBody.querySelector('#ewRows');
+        const jenisSelect = ewBody.querySelector('#ewJenis');
+        function drawRows() {
+          const jenis = jenisSelect.value;
+          const filtered = expiredLines.filter(l => l.drug.jenis === jenis);
+          rowsEl.innerHTML = filtered.length ? filtered.map((l, i) => `
+            <tr data-i="${i}">
+              <td><input type="checkbox" class="ewChk" checked></td>
+              <td>${escapeHtml(l.drug.nama)}</td>
+              <td>${escapeHtml(l.batch.no_batch || '-')}</td>
+              <td>${fmtDate(l.batch.tanggal_expired)}</td>
+              <td>${l.batch.qty_sisa} ${escapeHtml(l.drug.satuan)}</td>
+              <td><input type="number" class="ewQty" min="0" max="${l.batch.qty_sisa}" value="${l.batch.qty_sisa}" style="width:90px"></td>
+            </tr>`).join('') : `<tr><td colspan="6" class="empty">Tidak ada batch ${jenis} yang sudah kadaluarsa saat ini.</td></tr>`;
+          rowsEl.__lines = filtered;
+        }
+        drawRows();
+        jenisSelect.addEventListener('change', drawRows);
+
+        ewBody.querySelector('#ewCancel').addEventListener('click', close);
+        ewBody.querySelector('#ewSave').addEventListener('click', async () => {
+          const lines = rowsEl.__lines || [];
+          const trs = [...rowsEl.querySelectorAll('tr[data-i]')];
+          const items = [];
+          trs.forEach(tr => {
+            const i = Number(tr.dataset.i);
+            const checked = tr.querySelector('.ewChk').checked;
+            const qty = Number(tr.querySelector('.ewQty').value);
+            if (checked && qty > 0) {
+              const l = lines[i];
+              items.push({ drugId: l.drug.id, batchId: l.batch.id, nama: l.drug.nama, satuan: l.drug.satuan, qty });
+            }
+          });
+          if (!items.length) { toast('Pilih minimal satu item untuk dimusnahkan', 'err'); return; }
+          try {
+            const nomor = await api.nextNomorBeritaAcara(companyId);
+            const payload = {
+              company_id: companyId, nomor_berita_acara: nomor, tanggal: ewBody.querySelector('#ewTanggal').value,
+              jenis: jenisSelect.value, keterangan: ewBody.querySelector('#ewKet').value.trim() || null,
+              dibuat_oleh: ewBody.querySelector('#ewDibuat').value.trim() || null,
+              disaksikan_oleh: ewBody.querySelector('#ewSaksi').value.trim() || null,
+              dimusnahkan_oleh: ewBody.querySelector('#ewMusnah').value.trim() || null
+            };
+            await api.createExpiryWriteoff(payload, items);
+            const company = getCompanyById(companyId);
+            const sig = await api.getPrintSignatures(companyId);
+            toast('Berita Acara Kadaluwarsa tersimpan, stok sudah dikurangi otomatis');
+            close();
+            onDone();
+            printExpiryWriteoff({ ...payload, items }, company, sig);
+          } catch (err) {
+            toast(err.message || 'Gagal menyimpan Berita Acara', 'err');
+          }
+        });
+      }
+
+      async function drawHistory() {
+        ewBody.innerHTML = `<div class="empty">Memuat...</div>`;
+        const rows = await api.listExpiryWriteoffs();
+        ewBody.innerHTML = rows.length ? `<div class="table-wrap"><table>
+          <thead><tr><th>No. Berita Acara</th><th>Tanggal</th><th>Jenis</th><th>Jumlah Item</th><th></th></tr></thead>
+          <tbody>${rows.map(r => `<tr>
+            <td>${escapeHtml(r.nomor_berita_acara)}</td><td>${fmtDate(r.tanggal)}</td><td>${escapeHtml(r.jenis)}</td>
+            <td>${(r.expiry_writeoff_items || []).length}</td>
+            <td><button class="btn btn-sm btn-outline" data-view="${r.id}">Lihat/Cetak</button></td>
+          </tr>`).join('')}</tbody>
+        </table></div>` : `<div class="empty">Belum ada Berita Acara Kadaluwarsa.</div>`;
+        ewBody.querySelectorAll('[data-view]').forEach(btn => btn.addEventListener('click', async () => {
+          const r = rows.find(x => x.id === btn.dataset.view);
+          const company = getCompanyById(r.company_id);
+          const sig = await api.getPrintSignatures(r.company_id);
+          const items = (r.expiry_writeoff_items || []).map(it => ({
+            drugId: it.drug_id, batchId: it.batch_id, nama: it.drugs?.nama || '-', satuan: it.drugs?.satuan || it.satuan, qty: it.qty
+          }));
+          printExpiryWriteoff({ ...r, items }, company, sig);
+        }));
+      }
+
+      setTab('baru');
+    }
+  });
+}
+
+// ---------------- RKO (Rencana Kebutuhan Obat) ----------------
+async function openRkoModal(drugs) {
+  const sel = getSelectedCompanyId();
+  const companyId = sel === 'all' ? null : sel;
+  const usage = await api.rkoUsageStats();
+
+  const rows = drugs.filter(d => d.jenis === 'obat').map(d => {
+    const u = usage[d.id] || { rataRata: 0, stokMinimal: 0, stokMaksimal: 0 };
+    const saran = Math.max(0, Math.round(u.stokMaksimal - d.stok));
+    return {
+      id: d.id, nama: d.nama, satuan: d.satuan, stokAktual: d.stok,
+      rataRata: u.rataRata, stokMinimal: u.stokMinimal, stokMaksimal: u.stokMaksimal,
+      saranOrder: saran, hargaSatuan: d.hargaJual || 0
+    };
+  }).sort((a, b) => b.saranOrder - a.saranOrder);
+
+  openModal('RKO — Rencana Kebutuhan Obat', `
+    <p class="desc" style="margin-bottom:12px">Dihitung otomatis dari rata-rata pemakaian 12 bulan terakhir (stok minimal = rata-rata × 2 bulan, stok maksimal = rata-rata × 5 bulan). Kolom "Jumlah Order" bisa diedit manual sebelum dicetak.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Nama Obat</th><th>Satuan</th><th>Rata2/Bulan</th><th>Stok Minimal</th><th>Stok Maksimal</th><th>Stok Aktual</th><th>Jumlah Order</th><th>Harga Satuan</th><th>Total</th></tr></thead>
+      <tbody id="rkoRows"></tbody>
+    </table></div>
+    <div style="text-align:right;margin-top:10px;font-weight:700">Total Estimasi Biaya: <span id="rkoTotal">Rp 0</span></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+      <button type="button" class="btn btn-outline" id="rkoCancel">Tutup</button>
+      <button type="button" class="btn btn-primary" id="rkoPrint">Cetak RKO</button>
+    </div>
+  `, {
+    onMount: (body, close) => {
+      const rowsEl = body.querySelector('#rkoRows');
+      const totalEl = body.querySelector('#rkoTotal');
+      function drawTotal() {
+        const total = rows.reduce((s, r) => s + r.saranOrder * r.hargaSatuan, 0);
+        totalEl.textContent = 'Rp ' + total.toLocaleString('id-ID');
+      }
+      rowsEl.innerHTML = rows.map((r, i) => `
+        <tr data-i="${i}">
+          <td>${escapeHtml(r.nama)}</td><td>${escapeHtml(r.satuan)}</td>
+          <td>${r.rataRata.toFixed(1)}</td><td>${Math.round(r.stokMinimal)}</td><td>${Math.round(r.stokMaksimal)}</td>
+          <td>${r.stokAktual}</td>
+          <td><input type="number" class="rkoQty" min="0" value="${r.saranOrder}" style="width:90px"></td>
+          <td>Rp ${r.hargaSatuan.toLocaleString('id-ID')}</td>
+          <td class="rkoLineTotal">Rp ${(r.saranOrder * r.hargaSatuan).toLocaleString('id-ID')}</td>
+        </tr>`).join('');
+      drawTotal();
+      rowsEl.querySelectorAll('tr[data-i]').forEach(tr => {
+        const i = Number(tr.dataset.i);
+        tr.querySelector('.rkoQty').addEventListener('input', e => {
+          rows[i].saranOrder = Number(e.target.value) || 0;
+          tr.querySelector('.rkoLineTotal').textContent = 'Rp ' + (rows[i].saranOrder * rows[i].hargaSatuan).toLocaleString('id-ID');
+          drawTotal();
+        });
+      });
+      body.querySelector('#rkoCancel').addEventListener('click', close);
+      body.querySelector('#rkoPrint').addEventListener('click', () => {
+        printRko(rows, companyId ? getCompanyById(companyId) : null, new Date().getFullYear());
       });
     }
   });

@@ -172,6 +172,33 @@ export async function drugPeriodStats(fromDate, toDate) {
   return stats;
 }
 
+// Per-drug monthly usage for the last 12 full months — the basis for RKO
+// (Rencana Kebutuhan Obat): rata-rata pemakaian/bulan, and from that a
+// min/max reorder range (industry-standard min-max stock formula, matching
+// the min = avg x 2 / max = avg x 5 buffer already used in this klinik's
+// own RKO worksheet: 2 months of safety stock, 5 months as the order
+// ceiling so restocking doesn't need to happen again before the next
+// review cycle).
+export async function rkoUsageStats() {
+  const sel = getSelectedCompanyId();
+  const since = new Date(); since.setMonth(since.getMonth() - 11); since.setDate(1);
+  const sinceStr = since.toISOString().slice(0, 10);
+  let q = supabase.from('stock_transactions').select('drug_id, tipe, qty, tanggal').gte('tanggal', sinceStr);
+  if (sel !== 'all') q = q.eq('company_id', sel);
+  const rows = unwrap(await q);
+  const perDrug = {};
+  for (const r of rows) {
+    if (r.tipe !== 'keluar') continue;
+    perDrug[r.drug_id] = (perDrug[r.drug_id] || 0) + Number(r.qty);
+  }
+  const stats = {};
+  for (const [drugId, total] of Object.entries(perDrug)) {
+    const rataRata = total / 12;
+    stats[drugId] = { totalSetahun: total, rataRata, stokMinimal: rataRata * 2, stokMaksimal: rataRata * 5 };
+  }
+  return stats;
+}
+
 export async function createDrug(payload) {
   return unwrap(await supabase.from('drugs').insert(payload).select().single());
 }
@@ -250,6 +277,44 @@ export async function adjustStock(companyId, drugId, batchId, qty, keterangan) {
     company_id: companyId, drug_id: drugId, batch_id: batchId, tipe: 'penyesuaian', qty, tanggal: todayStr(), keterangan
   }));
   logActivity(companyId, 'adjust_stock', 'drug_batches', batchId, { qty, keterangan });
+}
+
+// ---------------- Berita Acara Kadaluwarsa (expiry write-off) ----------------
+export async function nextNomorBeritaAcara(companyId) {
+  const { count } = await supabase.from('expiry_writeoffs').select('id', { count: 'exact', head: true }).eq('company_id', companyId);
+  const year = new Date().getFullYear();
+  return `BA-EXP/${String((count || 0) + 1).padStart(4, '0')}/${year}`;
+}
+
+// Writes off expired stock in one document: each line deducts its batch's
+// qty_sisa and logs a 'kadaluarsa' stock_transaction, so Apotek stock and
+// the usage/stocktake reports never drift out of sync with what was
+// actually destroyed, and every deduction stays traceable back to this
+// Berita Acara via expiry_writeoff_items.
+export async function createExpiryWriteoff(payload, items) {
+  const writeoff = await unwrap(await supabase.from('expiry_writeoffs').insert(payload).select().single());
+  for (const line of items) {
+    const batch = await unwrap(await supabase.from('drug_batches').select('*').eq('id', line.batchId).single());
+    const newQty = Number(batch.qty_sisa) - line.qty;
+    if (newQty < 0) throw new Error(`Jumlah melebihi stok batch yang tersisa untuk ${line.nama || 'item ini'}`);
+    await unwrap(await supabase.from('drug_batches').update({ qty_sisa: newQty }).eq('id', line.batchId));
+    await unwrap(await supabase.from('stock_transactions').insert({
+      company_id: payload.company_id, drug_id: line.drugId, batch_id: line.batchId, tipe: 'kadaluarsa',
+      qty: line.qty, tanggal: payload.tanggal, keterangan: `Pemusnahan kadaluarsa — ${payload.nomor_berita_acara}`
+    }));
+    await unwrap(await supabase.from('expiry_writeoff_items').insert({
+      writeoff_id: writeoff.id, drug_id: line.drugId, batch_id: line.batchId, no_batch: batch.no_batch,
+      qty: line.qty, satuan: line.satuan || null, tanggal_expired: batch.tanggal_expired, harga_satuan: batch.harga_jual || 0
+    }));
+  }
+  logActivity(payload.company_id, 'expiry_writeoff', 'expiry_writeoffs', writeoff.id, { nomor: payload.nomor_berita_acara, items: items.length });
+  return writeoff;
+}
+
+export async function listExpiryWriteoffs() {
+  let q = supabase.from('expiry_writeoffs').select('*, expiry_writeoff_items(*, drugs(nama, kode, satuan))').order('tanggal', { ascending: false });
+  q = companyFilter(q);
+  return unwrap(await q);
 }
 
 // ---------------- Visits (SOAP) ----------------
@@ -348,7 +413,7 @@ export async function dashboardKpis(monthStart) {
 export async function dashboardYearData(year, statusPegawai = 'all') {
   const yearPrefix = `${year}-`;
   if (statusPegawai === 'all') {
-    const [kunjungan, topDiseases, topDeptDiseases, topDrugs, sks, rujukan, kk, stock] = await Promise.all([
+    const [kunjungan, topDiseases, topDeptDiseases, topDrugs, sks, rujukan, kk, stock, jenisKunjungan, disposisi] = await Promise.all([
       kpiFilter(supabase.from('v_kpi_kunjungan').select('*')).then(unwrap),
       kpiFilter(supabase.from('v_top_diseases').select('*')).then(unwrap),
       kpiFilter(supabase.from('v_top_diseases_departemen').select('*')).then(unwrap),
@@ -356,7 +421,9 @@ export async function dashboardYearData(year, statusPegawai = 'all') {
       kpiFilter(supabase.from('v_kpi_sks').select('*')).then(unwrap),
       kpiFilter(supabase.from('v_kpi_rujukan').select('*')).then(unwrap),
       kpiFilter(supabase.from('v_kpi_kecelakaan_kerja').select('*')).then(unwrap),
-      kpiFilter(supabase.from('v_stock_warnings').select('*')).then(unwrap)
+      kpiFilter(supabase.from('v_stock_warnings').select('*')).then(unwrap),
+      kpiFilter(supabase.from('v_kpi_jenis_kunjungan').select('*')).then(unwrap),
+      kpiFilter(supabase.from('v_kpi_disposisi').select('*')).then(unwrap)
     ]);
     const inYear = row => String(row.bulan).startsWith(yearPrefix);
     const kunjunganInYear = kunjungan.filter(inYear);
@@ -366,7 +433,9 @@ export async function dashboardYearData(year, statusPegawai = 'all') {
       kunjungan: kunjunganInYear, kunjunganBulanan: monthBucketsToArray(monthTotals),
       topDiseases: topDiseases.filter(inYear),
       topDeptDiseases: topDeptDiseases.filter(inYear), topDrugs: topDrugs.filter(inYear),
-      sks: sks.filter(inYear), rujukan: rujukan.filter(inYear), kk: kk.filter(inYear), stock
+      sks: sks.filter(inYear), rujukan: rujukan.filter(inYear), kk: kk.filter(inYear), stock,
+      jenisKunjungan: sumByKey(jenisKunjungan.filter(inYear), 'jenis_kunjungan', 'jumlah'),
+      disposisi: sumByKey(disposisi.filter(inYear), 'disposisi', 'jumlah')
     };
   }
 
@@ -376,6 +445,7 @@ export async function dashboardYearData(year, statusPegawai = 'all') {
   const visits = unwrap(await vq);
 
   const diseaseMap = {}, deptDiseaseMap = {}, drugMap = {};
+  const jenisKunjunganMap = {}, disposisiMap = {};
   let totalKunjungan = 0, totalKk = 0;
   const kkByTingkat = { FA: 0, MA: 0, LTI: 0 };
   const monthTotals = emptyMonthBuckets(year);
@@ -383,6 +453,8 @@ export async function dashboardYearData(year, statusPegawai = 'all') {
     totalKunjungan++;
     const bucket = String(v.tanggal).slice(0, 7);
     if (bucket in monthTotals) monthTotals[bucket]++;
+    if (v.jenis_kunjungan) jenisKunjunganMap[v.jenis_kunjungan] = (jenisKunjunganMap[v.jenis_kunjungan] || 0) + 1;
+    if (v.disposisi) disposisiMap[v.disposisi] = (disposisiMap[v.disposisi] || 0) + 1;
     for (const d of v.diagnosa || []) {
       diseaseMap[d.code] = diseaseMap[d.code] || { kode: d.code, penyakit: d.desc, jumlah: 0 };
       diseaseMap[d.code].jumlah++;
@@ -414,7 +486,8 @@ export async function dashboardYearData(year, statusPegawai = 'all') {
     topDeptDiseases: Object.entries(deptDiseaseMap).flatMap(([departemen, diseases]) => Object.entries(diseases).map(([kode, v]) => ({ departemen, kode, ...v }))),
     topDrugs: Object.entries(drugMap).map(([nama, jumlah]) => ({ nama, jumlah })),
     sks: [{ total_sks: sksRows.length }], rujukan: [{ total_rujukan: rujRows.length }],
-    kk: Object.entries(kkByTingkat).map(([tingkat, jumlah]) => ({ tingkat, jumlah })), stock
+    kk: Object.entries(kkByTingkat).map(([tingkat, jumlah]) => ({ tingkat, jumlah })), stock,
+    jenisKunjungan: jenisKunjunganMap, disposisi: disposisiMap
   };
 }
 
@@ -428,6 +501,19 @@ function emptyMonthBuckets(year) {
 
 function monthBucketsToArray(buckets) {
   return Object.entries(buckets).map(([bulan, total], i) => ({ bulan, label: MONTH_ABBR[i], total }));
+}
+
+// Collapses rows like [{jenis_kunjungan:'sakit', jumlah:5}, ...] (one row
+// per company per month when "Semua PT" is selected) into a single
+// {sakit: total, ...} map summed across every matching row.
+function sumByKey(rows, keyField, valueField) {
+  const out = {};
+  for (const r of rows) {
+    const k = r[keyField];
+    if (!k) continue;
+    out[k] = (out[k] || 0) + Number(r[valueField]);
+  }
+  return out;
 }
 
 // "Perlu Perhatian": patients flagged for follow-up — abnormal vitals on
@@ -460,7 +546,7 @@ export async function patientsNeedingAttention() {
     if (!seenLatestVisit.has(p.id)) {
       seenLatestVisit.add(p.id);
       const flags = evaluateVitals(v.vitals || {});
-      if (flags.length) flag(p, `Tanda vital abnormal (${flags.map(f => f.label).join(', ')})`);
+      if (flags.length) flag(p, `Tanda vital abnormal (${flags.map(f => `${f.label}: ${f.category}`).join(', ')})`);
     }
     if (p.riwayat_kronis?.length) flag(p, `Riwayat kronis: ${p.riwayat_kronis.join(', ')}`);
     if (['observasi', 'rawat_inap'].includes(v.disposisi)) {

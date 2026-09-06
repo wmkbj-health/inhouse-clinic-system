@@ -1,5 +1,6 @@
 import { escapeHtml, fmtDate } from './util.js';
 import { fmtAge, companyLogoUrl } from './state.js';
+import { lineChart, barChart, pieChart } from './charts.js';
 
 const BASE_STYLE = `
   body{font-family:Arial,sans-serif;padding:32px;color:#111}
@@ -10,15 +11,28 @@ const BASE_STYLE = `
   table{width:100%;border-collapse:collapse;margin:14px 0}
   td,th{padding:6px 4px;vertical-align:top;font-size:.9rem}
   .label{width:190px;font-weight:600}
-  .sign{margin-top:50px;display:flex;justify-content:space-around;gap:20px}
-  .sign div{text-align:center;font-size:.9rem}
-  .sign .line{margin-top:55px;border-top:1px solid #333;padding-top:4px;min-width:160px}
+  .sign{margin-top:50px;display:flex;flex-wrap:wrap;justify-content:center;gap:30px 20px}
+  .sign div{text-align:center;font-size:.9rem;flex:0 0 auto;width:150px}
+  .sign .line{margin-top:55px;border-top:1px solid #333;padding-top:4px;width:150px;word-wrap:break-word}
   .report-table th,.report-table td{border:1px solid #999;padding:5px 7px;font-size:.8rem}
   .report-table{border-collapse:collapse}
+  .stocktake-cat td{background:#eef1f5}
   .box{border:1px solid #999;padding:10px;border-radius:6px;margin:10px 0}
   .checkline{display:flex;gap:20px;margin:14px 0}
   .checkline label{display:flex;align-items:center;gap:6px;font-size:.9rem}
   .tembusan{margin-top:30px;font-size:.8rem;color:#333}
+  .report-section{margin-top:26px}
+  .chart{width:100%;max-width:640px;height:auto;display:block;margin:0 auto}
+  .chart-pie{width:auto;max-width:220px}
+  .chart-grid{stroke:#ddd;stroke-width:1}
+  .chart-axis-x,.chart-axis-y{font-size:9px;fill:#555}
+  .chart-axis-y{text-anchor:end}
+  .chart-bar-value{font-size:10px;font-weight:700;fill:#111}
+  .chart-pie-wrap{display:flex;align-items:center;gap:20px;flex-wrap:wrap;justify-content:center;padding:6px 0}
+  .chart-legend{display:flex;flex-direction:column;gap:6px;font-size:.82rem}
+  .chart-legend-item{display:flex;align-items:center;gap:8px}
+  .chart-legend-dot{width:10px;height:10px;border-radius:3px;flex-shrink:0}
+  .report-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
 `;
 
 function openPrint(title, bodyHtml) {
@@ -213,7 +227,14 @@ export function printMedicalConsentForm(patient, company, type, form = {}, sig =
   `);
 }
 
+// Full management-facing report: KPI summary, then every chart shown on the
+// dashboard screen re-rendered at print resolution (same inline-SVG chart
+// functions, just with print-safe colors — see the chart-* classes in
+// BASE_STYLE), so this can go straight into a presentation to perusahaan
+// without extra work.
 export function printDashboardReport(company, kpis, periodLabel) {
+  const bulanan = kpis.kunjunganBulanan || [];
+  const kkChart = ['FA', 'MA', 'LTI'].map(t => ({ label: t, value: kpis.kk?.find(k => k.tingkat === t)?.jumlah || 0 }));
   openPrint('Laporan Dashboard Klinik', `
     ${letterhead(company, `LAPORAN OPERASIONAL KLINIK — ${escapeHtml(periodLabel)}`)}
     <table class="report-table">
@@ -224,28 +245,54 @@ export function printDashboardReport(company, kpis, periodLabel) {
         <tr><td>Total Kecelakaan Kerja</td><td>${kpis.totalKk}</td></tr>
       </tbody>
     </table>
-    <h3 style="margin-top:20px">Top Five Disease</h3>
-    <table class="report-table"><thead><tr><th>Kode</th><th>Penyakit</th><th>Jumlah</th></tr></thead>
-      <tbody>${kpis.topDiseases.map(d => `<tr><td>${escapeHtml(d.kode)}</td><td>${escapeHtml(d.penyakit)}</td><td>${d.jumlah}</td></tr>`).join('')}</tbody></table>
-    <h3 style="margin-top:20px">Top 10 Medicine</h3>
+
+    ${bulanan.length ? `<div class="report-section"><h3>Tren Kunjungan per Bulan</h3>${lineChart(bulanan.map(b => b.label), bulanan.map(b => b.total))}</div>` : ''}
+
+    <div class="report-section"><h3>Top Five Disease</h3>
+      ${kpis.topDiseases.length ? barChart(kpis.topDiseases.map(d => ({ label: `${d.kode} — ${d.penyakit}`, value: d.jumlah }))) : ''}
+      <table class="report-table"><thead><tr><th>Kode</th><th>Penyakit</th><th>Jumlah</th></tr></thead>
+        <tbody>${kpis.topDiseases.map(d => `<tr><td>${escapeHtml(d.kode)}</td><td>${escapeHtml(d.penyakit)}</td><td>${d.jumlah}</td></tr>`).join('')}</tbody></table>
+    </div>
+
+    <div class="report-section"><h3>Top 10 Medicine</h3>
     <table class="report-table"><thead><tr><th>Obat</th><th>Jumlah</th></tr></thead>
       <tbody>${kpis.topDrugs.map(d => `<tr><td>${escapeHtml(d.nama)}</td><td>${d.jumlah}</td></tr>`).join('')}</tbody></table>
+    </div>
+
+    <div class="report-section report-grid-2">
+      <div><h3>Jenis Kasus Pasien</h3>${pieChart(kpis.jenisKunjungan || [])}</div>
+      <div><h3>Disposisi Pasien</h3>${pieChart(kpis.disposisi || [])}</div>
+    </div>
+    <div class="report-section"><h3>Kecelakaan Kerja per Tingkat</h3>${pieChart(kkChart)}</div>
   `);
 }
 
+// Grouped by kategori (matching how this klinik's own monthly stocktake
+// workbook lays it out: a category header row, then its items numbered
+// underneath), with a free-text Keterangan column ("Kosong" auto-filled
+// when stock has run out, otherwise left blank for a handwritten note).
 export function printStocktake(drugs, company, periodLabel, jenisLabel, sig = {}) {
+  const byCategory = {};
+  for (const d of drugs) {
+    const cat = d.drug_categories?.name || 'Tanpa Kategori';
+    (byCategory[cat] = byCategory[cat] || []).push(d);
+  }
+  let no = 0;
+  const body = Object.entries(byCategory).map(([cat, items]) => `
+    <tr class="stocktake-cat"><td colspan="10"><b>${escapeHtml(cat.toUpperCase())}</b></td></tr>
+    ${items.map(d => { no++; return `<tr>
+      <td>${no}</td><td>${escapeHtml(d.nama)}${d.nama_paten ? ` <span style="color:#666">(${escapeHtml(d.nama_paten)})</span>` : ''}</td>
+      <td>${escapeHtml(d.satuan)}</td>
+      <td>${d.stokAwal ?? '-'}</td><td>${d.penerimaan ?? 0}</td><td>${d.pemakaian ?? 0}</td><td>${(d.rataRata ?? 0).toFixed(2)}</td>
+      <td>${d.stok}</td><td>${d.nextExpiry ? fmtDate(d.nextExpiry) : '-'}</td>
+      <td>${d.stok <= 0 ? 'Kosong' : d.stok <= d.stok_minimum ? 'Perlu Pesan Ulang' : ''}</td>
+    </tr>`; }).join('')}
+  `).join('');
   openPrint(`Stocktake ${jenisLabel}`, `
     ${letterhead(company, `STOCKTAKE ${escapeHtml(jenisLabel.toUpperCase())} — ${escapeHtml(periodLabel)}`)}
     <table class="report-table">
-      <thead><tr><th>Kode</th><th>Nama</th><th>Nama Paten</th><th>Stok Awal</th><th>Penerimaan</th><th>Pemakaian</th><th>Rata2/Hari</th><th>Stok Akhir</th><th>Exp. Terdekat</th><th>Status</th></tr></thead>
-      <tbody>
-        ${drugs.map(d => `<tr>
-          <td>${escapeHtml(d.kode)}</td><td>${escapeHtml(d.nama)}</td><td>${escapeHtml(d.nama_paten || '-')}</td>
-          <td>${d.stokAwal ?? '-'}</td><td>${d.penerimaan ?? 0}</td><td>${d.pemakaian ?? 0}</td><td>${(d.rataRata ?? 0).toFixed(2)}</td>
-          <td>${d.stok} ${escapeHtml(d.satuan)}</td><td>${d.nextExpiry ? fmtDate(d.nextExpiry) : '-'}</td>
-          <td>${d.stok <= d.stok_minimum ? 'PERLU PESAN ULANG' : 'AMAN'}</td>
-        </tr>`).join('')}
-      </tbody>
+      <thead><tr><th>No</th><th>Item</th><th>Satuan</th><th>Stok Awal</th><th>Penerimaan</th><th>Pemakaian</th><th>Rata2/Bulan</th><th>Stok Aktual</th><th>Exp. Terdekat</th><th>Keterangan</th></tr></thead>
+      <tbody>${body}</tbody>
     </table>
     ${signBlock(extraSigners(sig, 'stocktake').length ? extraSigners(sig, 'stocktake') : [
       { label: 'Dibuat oleh (Apoteker/Petugas)', name: '' },
@@ -273,6 +320,54 @@ export function printDrugRequest(request, drugItems, company, sig = {}) {
       { label: 'Diminta oleh', name: request.diminta_oleh || '' },
       { label: 'Disetujui oleh', name: request.disetujui_oleh || '' },
       ...extraSigners(sig, 'drug_request')
+    ])}
+  `);
+}
+
+export function printExpiryWriteoff(writeoff, company, sig = {}) {
+  const totalNilai = writeoff.items.reduce((s, it) => s + (it.qty * (it.harga_satuan || 0)), 0);
+  openPrint(`Berita Acara Kadaluwarsa - ${writeoff.nomor_berita_acara}`, `
+    ${letterhead(company, 'BERITA ACARA PEMUSNAHAN OBAT/ALKES KADALUWARSA')}
+    <table>
+      <tr><td class="label">Nomor</td><td>: ${escapeHtml(writeoff.nomor_berita_acara)}</td></tr>
+      <tr><td class="label">Tanggal</td><td>: ${fmtDate(writeoff.tanggal)}</td></tr>
+      <tr><td class="label">Jenis</td><td>: ${escapeHtml((writeoff.jenis || '').toUpperCase())}</td></tr>
+    </table>
+    <p>Pada tanggal tersebut di atas, telah dilakukan pemusnahan/penarikan terhadap obat/alat kesehatan yang telah kadaluwarsa dengan rincian sebagai berikut:</p>
+    <table class="report-table">
+      <thead><tr><th>Nama Item</th><th>Jumlah</th><th>Satuan</th></tr></thead>
+      <tbody>${writeoff.items.map(it => `<tr>
+        <td>${escapeHtml(it.nama)}</td><td>${it.qty}</td><td>${escapeHtml(it.satuan || '-')}</td>
+      </tr>`).join('')}</tbody>
+    </table>
+    ${writeoff.keterangan ? `<p>Keterangan/Cara Pemusnahan: ${escapeHtml(writeoff.keterangan)}</p>` : ''}
+    <p>Stok item-item di atas telah dikurangi secara otomatis dari sistem apotek pada saat Berita Acara ini dibuat, sehingga tidak menimbulkan selisih stok di kemudian hari.</p>
+    ${signBlock([
+      { label: 'Dibuat oleh', name: writeoff.dibuat_oleh || '' },
+      { label: 'Disaksikan oleh', name: writeoff.disaksikan_oleh || '' },
+      { label: 'Dimusnahkan oleh', name: writeoff.dimusnahkan_oleh || '' },
+      ...extraSigners(sig, 'stocktake')
+    ])}
+  `);
+}
+
+export function printRko(rows, company, year) {
+  const total = rows.reduce((s, r) => s + r.saranOrder * r.hargaSatuan, 0);
+  openPrint(`RKO ${year}`, `
+    ${letterhead(company, `RENCANA KEBUTUHAN OBAT (RKO) — TAHUN ${year}`)}
+    <table class="report-table">
+      <thead><tr><th>Nama Obat</th><th>Satuan</th><th>Rata2 Pemakaian/Bulan</th><th>Stok Minimal</th><th>Stok Maksimal</th><th>Stok Aktual</th><th>Jumlah Order</th><th>Harga Satuan</th><th>Total</th></tr></thead>
+      <tbody>${rows.map(r => `<tr>
+        <td>${escapeHtml(r.nama)}</td><td>${escapeHtml(r.satuan)}</td>
+        <td>${r.rataRata.toFixed(1)}</td><td>${Math.round(r.stokMinimal)}</td><td>${Math.round(r.stokMaksimal)}</td>
+        <td>${r.stokAktual}</td><td><b>${r.saranOrder}</b></td>
+        <td>Rp ${r.hargaSatuan.toLocaleString('id-ID')}</td><td>Rp ${(r.saranOrder * r.hargaSatuan).toLocaleString('id-ID')}</td>
+      </tr>`).join('')}</tbody>
+      <tfoot><tr><td colspan="8" style="text-align:right;font-weight:700">Total Estimasi Biaya</td><td style="font-weight:700">Rp ${total.toLocaleString('id-ID')}</td></tr></tfoot>
+    </table>
+    ${signBlock([
+      { label: 'Dibuat oleh (Apoteker/Petugas)', name: '' },
+      { label: 'Diketahui oleh (Dokter)', name: '' }
     ])}
   `);
 }

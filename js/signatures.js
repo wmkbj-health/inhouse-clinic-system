@@ -9,12 +9,6 @@ export const DOC_TYPES = {
   drug_request: 'Permintaan Pengadaan Obat'
 };
 
-const DEFAULT_ROWS = [
-  { label: 'Dokter', nama: '' },
-  { label: 'Apoteker / Petugas Farmasi', nama: '' },
-  { label: 'Admin/HRD', nama: '' }
-];
-
 function rowHtml(row, idx) {
   return `
     <div class="sig-row" data-idx="${idx}">
@@ -32,12 +26,12 @@ export async function openSignatureModal(companyId, docType = 'rujukan', onSaved
   const sig = await api.getPrintSignatures(companyId);
   const byType = {};
   for (const type of Object.keys(DOC_TYPES)) {
-    const rows = sig.signatures?.[type] || sig.signatures?.default;
-    byType[type] = (rows && rows.length ? rows : DEFAULT_ROWS).map(r => ({ ...r }));
+    const rows = sig.signatures?.[type] || sig.signatures?.default || [];
+    byType[type] = rows.map(r => ({ ...r }));
   }
 
   openModal('Kolom Tanda Tangan Dokumen Cetak', `
-    <p class="desc" style="margin-bottom:12px">Setiap jenis surat/laporan punya kolom tanda tangannya sendiri — atur satu per satu lewat menu di bawah, lalu simpan semuanya sekaligus.</p>
+    <p class="desc" style="margin-bottom:12px">Setiap jenis surat/laporan punya kolom tanda tangannya sendiri — atur satu per satu lewat menu di bawah, lalu simpan semuanya sekaligus. Setiap dokumen sudah punya penanda tangan bawaannya sendiri (mis. "Dokter Perujuk" pada Rujukan) — kolom di bawah ini hanya untuk menambah tanda tangan lain di luar itu, jadi kosongkan saja bila tidak perlu tambahan (mencegah kolom dobel/berantakan saat dicetak).</p>
     <div class="field" style="margin-bottom:14px;max-width:340px">
       <label>Jenis Dokumen</label>
       <select id="sigDocType">${Object.entries(DOC_TYPES).map(([v, l]) => `<option value="${v}" ${v === docType ? 'selected' : ''}>${escapeHtml(l)}</option>`).join('')}</select>
@@ -59,10 +53,7 @@ export async function openSignatureModal(companyId, docType = 'rujukan', onSaved
 
       function bindRemove() {
         rowsEl.querySelectorAll('.sig-remove').forEach(btn => {
-          btn.onclick = () => {
-            if (rowsEl.querySelectorAll('.sig-row').length <= 1) { toast('Minimal 1 kolom tanda tangan', 'err'); return; }
-            btn.closest('.sig-row').remove();
-          };
+          btn.onclick = () => { btn.closest('.sig-row').remove(); };
         });
       }
 

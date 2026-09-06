@@ -46,7 +46,7 @@ export function barChart(items, { height = 220 } = {}) {
     return `
       <rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${barH.toFixed(1)}" rx="4" fill="${color}"><title>${escapeHtml(it.label)}: ${it.value}</title></rect>
       <text x="${(x + barW / 2).toFixed(1)}" y="${(y - 6).toFixed(1)}" class="chart-bar-value" text-anchor="middle">${it.value}</text>
-      <text x="${(x + barW / 2).toFixed(1)}" y="${h - 10}" class="chart-axis-x" text-anchor="middle">${escapeHtml(truncate(it.label, 10))}</text>`;
+      <text x="${(x + barW / 2).toFixed(1)}" y="${h - 10}" class="chart-axis-x" text-anchor="middle">${escapeHtml(truncate(it.label, 16))}</text>`;
   }).join('');
   return `<svg class="chart chart-bar" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Grafik batang">${bars}</svg>`;
 }

@@ -517,7 +517,7 @@ async function openSoapModal(queueItem, onDone) {
         const flags = evaluateVitals(collectVitals());
         if (flags.length) {
           vitalsAlert.style.display = '';
-          vitalsAlert.textContent = `⚠ Nilai abnormal: ${flags.map(f => `${f.label} ${f.value}${f.unit} (${f.direction === 'high' ? 'tinggi' : 'rendah'})`).join(', ')}`;
+          vitalsAlert.textContent = `⚠ Nilai abnormal: ${flags.map(f => `${f.label} ${f.value}${f.unit} — ${f.category}`).join(', ')}`;
         } else {
           vitalsAlert.style.display = 'none';
         }

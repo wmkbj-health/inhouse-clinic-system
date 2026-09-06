@@ -336,6 +336,7 @@ tbody tr:last-child td { border-bottom: none; }
 
 /* ---------- Charts (dependency-free inline SVG) ---------- */
 .chart { width: 100%; height: auto; display: block; }
+.chart-pie { width: auto; max-width: 220px; }
 .chart-grid { stroke: var(--border); stroke-width: 1; }
 .chart-axis-x, .chart-axis-y { font-size: 9px; fill: var(--muted); }
 .chart-axis-y { text-anchor: end; }
