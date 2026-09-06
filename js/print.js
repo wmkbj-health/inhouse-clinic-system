@@ -18,8 +18,11 @@ const BASE_STYLE = `
   .report-table{border-collapse:collapse}
   .stocktake-cat td{background:#eef1f5}
   .st-aman{background:#c8e6c9;font-weight:700;text-align:center}
+  .st-watch{background:#fff9c4;font-weight:700;text-align:center}
   .st-soon{background:#ffe0b2;font-weight:700;text-align:center}
+  .st-crit{background:#ffb74d;font-weight:700;text-align:center}
   .st-exp{background:#ffcdd2;font-weight:700;text-align:center}
+  .st-habis{background:#b71c1c;color:#fff;font-weight:700;text-align:center}
   .photo-print-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:10px}
   .photo-print-grid figure{margin:0;border:1px solid #ccc;border-radius:8px;overflow:hidden;background:#fafafa}
   .photo-print-grid img{width:100%;height:150px;object-fit:cover;display:block}
@@ -274,13 +277,28 @@ export function printDashboardReport(company, kpis, periodLabel) {
   `);
 }
 
-// Status is computed purely from expiry, matching the klinik's own stock
-// report: sudah lewat -> KADALUWARSA, dalam 90 hari -> <3 BULAN, else AMAN.
-function expiryStatus(tanggalExpired) {
-  if (!tanggalExpired) return { label: 'AMAN', cls: 'st-aman' };
-  const days = Math.round((new Date(tanggalExpired) - new Date()) / 86400000);
-  if (days < 0) return { label: 'KADALUWARSA', cls: 'st-exp' };
-  if (days <= 90) return { label: '<3 BULAN', cls: 'st-soon' };
+// Matured stock status: the reference stock report only ever looked at
+// expiry date (sudah lewat / <3 bulan / aman). A real apotek stocktake has
+// to flag two independent risks per Pedoman Pelayanan Kefarmasian Kemenkes
+// (Permenkes 74/2016 & 34/2021) and umum CDOB near-expiry monitoring
+// practice: (1) stok yang sudah/akan kadaluwarsa, and (2) stok yang sudah
+// di bawah ambang batas minimum dan perlu dipesan ulang — either one alone
+// is actionable, so both are checked and the worse of the two wins:
+//   STOK HABIS > KADALUWARSA > STOK KRITIS (≤ stok minimum) >
+//   ≤ 3 BULAN LAGI > PANTAU (3–6 BULAN) > AMAN
+function stockStatus(qtyAkhir, stokMinimum, tanggalExpired) {
+  const qty = Number(qtyAkhir) || 0;
+  if (qty <= 0) return { label: 'STOK HABIS', cls: 'st-habis' };
+
+  let expDays = null;
+  if (tanggalExpired) expDays = Math.round((new Date(tanggalExpired) - new Date()) / 86400000);
+  if (expDays !== null && expDays < 0) return { label: 'KADALUWARSA', cls: 'st-exp' };
+
+  const min = Number(stokMinimum) || 0;
+  if (min > 0 && qty <= min) return { label: 'STOK KRITIS (Pesan Ulang)', cls: 'st-crit' };
+
+  if (expDays !== null && expDays <= 90) return { label: '≤ 3 BULAN LAGI', cls: 'st-soon' };
+  if (expDays !== null && expDays <= 180) return { label: 'PANTAU (3-6 BULAN)', cls: 'st-watch' };
   return { label: 'AMAN', cls: 'st-aman' };
 }
 
@@ -306,7 +324,7 @@ export function printStocktake(drugs, company, periodLabel, jenisLabel, sig = {}
       const stats = b ? (batchStats[b.id] || { masuk: 0, keluar: 0 }) : { masuk: 0, keluar: 0 };
       const stokAkhir = b ? Number(b.qty_sisa) : 0;
       const stokAwal = isCurrentMonth ? Math.max(0, stokAkhir - stats.masuk + stats.keluar) : null;
-      const st = expiryStatus(b?.tanggal_expired);
+      const st = stockStatus(stokAkhir, d.stok_minimum, b?.tanggal_expired);
       return `<tr>
         <td>${no}</td><td>${escapeHtml(d.kode)}</td>
         <td>${escapeHtml(d.nama)}${d.nama_paten ? ` <span style="color:#666">(${escapeHtml(d.nama_paten)})</span>` : ''}</td>
@@ -319,12 +337,12 @@ export function printStocktake(drugs, company, periodLabel, jenisLabel, sig = {}
     })).join('');
     return `<tr class="stocktake-cat"><td colspan="13"><b>${escapeHtml(cat.toUpperCase())}</b></td></tr>${rowsHtml}`;
   }).join('');
-  openPrint(`Stocktake ${jenisLabel}`, `
-    ${letterhead(company, `STOCKTAKE ${escapeHtml(jenisLabel.toUpperCase())} — ${escapeHtml(periodLabel)}`)}
+  openPrint(`Laporan Stok Opname ${jenisLabel}`, `
+    ${letterhead(company, `LAPORAN STOK OPNAME ${escapeHtml(jenisLabel.toUpperCase())} — ${escapeHtml(periodLabel)}`)}
     <table class="report-table">
       <thead><tr>
         <th>No</th><th>Kode</th><th>Nama</th><th>Satuan</th><th>Sediaan</th><th>Harga Satuan</th>
-        <th>Stok Awal</th><th>Stok Masuk</th><th>Stok Keluar</th><th>Stok Akhir</th><th>Stok Minimum</th><th>Expired Date</th><th>Status</th>
+        <th>Stok Awal</th><th>Stok Masuk</th><th>Stok Keluar</th><th>Stok Akhir</th><th>Stok Minimum</th><th>Tanggal Kadaluwarsa</th><th>Status</th>
       </tr></thead>
       <tbody>${body}</tbody>
     </table>

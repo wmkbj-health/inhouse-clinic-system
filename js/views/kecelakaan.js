@@ -1,5 +1,6 @@
 import * as api from '../api.js';
 import { escapeHtml, fmtDate, debounce } from '../util.js';
+import { openEditVisitModal } from './pasien.js';
 
 const TINGKAT_INFO = {
   FA: { label: 'First Aid (FA)', cls: 'badge-ok', desc: 'Cedera ringan, penanganan pertolongan pertama tanpa rujukan medis lanjutan.' },
@@ -27,7 +28,7 @@ export async function renderKecelakaan(root) {
         <select id="yearFilter" style="max-width:120px"><option value="">Semua Tahun</option></select>
       </div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Tgl</th><th>Nama Pasien</th><th>Departemen</th><th>Tingkat</th><th>Diagnosa</th><th>Terkena</th><th>Kronologi</th></tr></thead>
+        <thead><tr><th>Tgl</th><th>Nama Pasien</th><th>Departemen</th><th>Tingkat</th><th>Diagnosa</th><th>Terkena</th><th>Kronologi</th><th></th></tr></thead>
         <tbody id="rows"></tbody>
       </table></div>
     </div>
@@ -52,7 +53,7 @@ export async function renderKecelakaan(root) {
   yearSel.insertAdjacentHTML('beforeend', years.map(y => `<option value="${y}">${y}</option>`).join(''));
 
   function draw(list) {
-    if (!list.length) { rows.innerHTML = `<tr><td colspan="7" class="empty">Belum ada kasus kecelakaan kerja tercatat.</td></tr>`; return; }
+    if (!list.length) { rows.innerHTML = `<tr><td colspan="8" class="empty">Belum ada kasus kecelakaan kerja tercatat.</td></tr>`; return; }
     rows.innerHTML = list.map(v => {
       const kk = v.kecelakaan_kerja || {};
       const info = TINGKAT_INFO[kk.tingkat] || {};
@@ -64,8 +65,19 @@ export async function renderKecelakaan(root) {
         <td>${(v.diagnosa || []).map(d => escapeHtml(d.code)).join(', ') || '-'}</td>
         <td>${escapeHtml(kk.terkena || '-')}</td>
         <td style="white-space:normal;max-width:280px">${escapeHtml(kk.kronologi || '-')}</td>
+        <td><button class="btn btn-sm btn-outline" data-detail="${v.id}">Detail/Edit</button></td>
       </tr>`;
     }).join('');
+    rows.querySelectorAll('[data-detail]').forEach(btn => btn.addEventListener('click', async () => {
+      const full = await api.getVisit(btn.dataset.detail);
+      // Reusing the same edit-visit modal Riwayat Kunjungan uses — this is
+      // the same visits row, so a correction here is already in sync with
+      // the patient's own visit history without any extra wiring.
+      openEditVisitModal(full, async () => {
+        cases.splice(0, cases.length, ...await api.listKecelakaanKerja());
+        applyFilters();
+      });
+    }));
   }
   draw(cases);
 

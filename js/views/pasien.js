@@ -173,6 +173,7 @@ async function renderPatientListTab(container) {
         <td>${escapeHtml(p.companies?.code || '-')}</td>
         <td style="display:flex;gap:6px">
           <button class="btn btn-sm btn-outline" data-daftar="${p.id}">Antrian</button>
+          <button class="btn btn-sm btn-danger" data-hapus="${p.id}">Hapus</button>
         </td>
       </tr>`).join('');
 
@@ -187,6 +188,18 @@ async function renderPatientListTab(container) {
       const q = await api.addToQueue(p.company_id, p, '', p.status_pegawai === 'mitra_kerja' ? 'Poli Kecelakaan Kerja / Umum' : 'Poli Umum');
       const posisi = await api.queuePositionToday(p.company_id, q.id);
       toast(`${p.nama} masuk antrian — Nomor Antrian: ${posisi}`);
+    }));
+    rows.querySelectorAll('[data-hapus]').forEach(btn => btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const p = list.find(x => x.id === btn.dataset.hapus);
+      if (!confirmDialog(`Hapus data pasien "${p.nama}" (No. RM ${p.no_rm})? Tindakan ini permanen dan tidak bisa dibatalkan.`)) return;
+      try {
+        await api.deletePatient(p.id);
+        toast('Data pasien dihapus');
+        draw(container.querySelector('#patSearch').value.trim());
+      } catch (err) {
+        toast(err.message || 'Gagal menghapus pasien', 'err');
+      }
     }));
   }
   draw();
@@ -237,15 +250,23 @@ function openPatientDetailModal(patient, onChange) {
         }
       });
 
-      const visits = await api.getVisitsByPatient(patient.id);
-      const histEl = body.querySelector('#visitHistory');
-      histEl.innerHTML = visits.length ? `<table>
-        <thead><tr><th>Tanggal</th><th>Jenis</th><th>Diagnosa</th><th>Disposisi</th><th>Biaya</th></tr></thead>
-        <tbody>${visits.map(v => `<tr>
-          <td>${fmtDate(v.tanggal)}</td><td>${escapeHtml(v.jenis_kunjungan)}</td>
-          <td>${(v.diagnosa || []).map(d => escapeHtml(d.code)).join(', ') || '-'}</td>
-          <td>${escapeHtml(v.disposisi)}</td><td>Rp ${Number(v.biaya_total || 0).toLocaleString('id-ID')}</td>
-        </tr>`).join('')}</tbody></table>` : `<div class="empty">Belum ada riwayat kunjungan.</div>`;
+      async function drawHistory() {
+        const visits = await api.getVisitsByPatient(patient.id);
+        const histEl = body.querySelector('#visitHistory');
+        histEl.innerHTML = visits.length ? `<table>
+          <thead><tr><th>Tanggal</th><th>Jenis</th><th>Diagnosa</th><th>Disposisi</th><th>Biaya</th><th></th></tr></thead>
+          <tbody>${visits.map(v => `<tr>
+            <td>${fmtDate(v.tanggal)}</td><td>${escapeHtml(v.jenis_kunjungan)}</td>
+            <td>${(v.diagnosa || []).map(d => escapeHtml(d.code)).join(', ') || '-'}</td>
+            <td>${escapeHtml(v.disposisi)}</td><td>Rp ${Number(v.biaya_total || 0).toLocaleString('id-ID')}</td>
+            <td><button class="btn btn-sm btn-outline" data-edit-visit="${v.id}">Edit</button></td>
+          </tr>`).join('')}</tbody></table>` : `<div class="empty">Belum ada riwayat kunjungan.</div>`;
+        histEl.querySelectorAll('[data-edit-visit]').forEach(btn => btn.addEventListener('click', async () => {
+          const full = await api.getVisit(btn.dataset.editVisit);
+          openEditVisitModal(full, drawHistory);
+        }));
+      }
+      drawHistory();
     }
   });
 }
@@ -373,15 +394,7 @@ function openNewPatientModal(onDone) {
       body.querySelector('#statusPegawai').addEventListener('change', e => {
         body.querySelector('#mitraBlock').style.display = e.target.value === 'mitra_kerja' ? 'grid' : 'none';
       });
-      body.querySelector('#newPatientForm').addEventListener('submit', async e => {
-        e.preventDefault();
-        const fd = new FormData(e.target);
-        const companyId = fd.get('company_id');
-        const nama = fd.get('nama').trim();
-        const nik = fd.get('nik').trim() || null;
-        const tgl_lahir = fd.get('tgl_lahir');
-        const dup = await api.findDuplicatePatient(companyId, { nik, nama, tglLahir: tgl_lahir });
-        if (dup && !confirmDialog(`Sudah ada pasien dengan data serupa: ${dup.nama} (No. RM ${dup.no_rm}${dup.nik ? `, NIK ${dup.nik}` : ''}). Tetap daftarkan sebagai pasien baru?`)) return;
+      async function doRegister(fd, companyId) {
         const no_rm = await api.nextRmNumber(companyId);
         try {
           const patient = await api.createPatient({
@@ -401,6 +414,76 @@ function openNewPatientModal(onDone) {
         } catch (err) {
           toast(err.message || 'Gagal mendaftarkan pasien', 'err');
         }
+      }
+
+      async function useExisting(existing, fd, companyId) {
+        try {
+          const q = await api.addToQueue(companyId, existing, fd.get('keluhan').trim(), 'Poli Umum');
+          const posisi = await api.queuePositionToday(companyId, q.id);
+          close();
+          onDone();
+          toast(`${existing.nama} (No. RM ${existing.no_rm}) ditambahkan ke antrian — bukan pasien baru, data lama dipakai.`);
+          openRegistrationSuccessModal(existing, posisi);
+        } catch (err) {
+          toast(err.message || 'Gagal menambahkan ke antrian', 'err');
+        }
+      }
+
+      body.querySelector('#newPatientForm').addEventListener('submit', async e => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const companyId = fd.get('company_id');
+        const nama = fd.get('nama').trim();
+        const nik = fd.get('nik').trim() || null;
+        const matches = await api.findPossibleDuplicatePatients(companyId, { nik, nama });
+        if (matches.length) {
+          openDuplicateMatchModal(matches, {
+            onUseExisting: existing => useExisting(existing, fd, companyId),
+            onRegisterNew: () => doRegister(fd, companyId)
+          });
+          return;
+        }
+        await doRegister(fd, companyId);
+      });
+    }
+  });
+}
+
+// No. RM is the standard identifier for "this is the same patient" — a
+// name match alone is only a hint. Shown right before a new patient would
+// be created, so staff can route a returning patient to their existing RM
+// (all repeat visits stay under that one record, with full riwayat
+// kunjungan) instead of accidentally minting a second RM for someone
+// already registered. A same name with a different RM is not itself a
+// problem — it's shown here purely so a human can confirm one way or the other.
+function openDuplicateMatchModal(matches, { onUseExisting, onRegisterNew }) {
+  openModal('Kemungkinan Pasien Sudah Terdaftar', `
+    <p class="desc" style="margin-bottom:12px">Ditemukan ${matches.length} pasien dengan nama/NIK yang sama. Jika ini orang yang sama, pilih "Gunakan Data Ini" agar riwayat kunjungannya tetap pada satu No. RM — bukan No. RM baru. Jika ternyata orang berbeda (kebetulan nama sama), lanjutkan sebagai pasien baru.</p>
+    <div class="sig-rows" id="dupList" style="margin-bottom:14px"></div>
+    <div style="display:flex;justify-content:space-between;gap:8px">
+      <button type="button" class="btn btn-outline" id="dupCancel">Batal</button>
+      <button type="button" class="btn btn-danger" id="dupNew">Bukan, Daftarkan Pasien Baru</button>
+    </div>
+  `, {
+    onMount: (body, close) => {
+      body.querySelector('#dupList').innerHTML = matches.map(m => `
+        <div class="list-row">
+          <div class="main">
+            <div class="name">${escapeHtml(m.nama)} <span class="badge badge-muted">${escapeHtml(m.no_rm)}</span></div>
+            <div class="meta">${m.nik ? `NIK ${escapeHtml(m.nik)} • ` : ''}${fmtDate(m.tgl_lahir)} (${fmtAge(m.tgl_lahir)}) • ${escapeHtml(m.departemen || '-')}</div>
+          </div>
+          <button type="button" class="btn btn-sm btn-primary" data-use="${m.id}">Gunakan Data Ini</button>
+        </div>`).join('');
+      body.querySelectorAll('[data-use]').forEach(btn => btn.addEventListener('click', () => {
+        const m = matches.find(x => x.id === btn.dataset.use);
+        close();
+        onUseExisting(m);
+      }));
+      body.querySelector('#dupCancel').addEventListener('click', close);
+      body.querySelector('#dupNew').addEventListener('click', () => {
+        if (!confirmDialog('Yakin ini orang berbeda? No. RM baru akan dibuat.')) return;
+        close();
+        onRegisterNew();
       });
     }
   });
@@ -766,6 +849,165 @@ function openConsentModal(patient) {
           printMedicalConsentForm(patient, patient.companies || getCompanyById(patient.company_id), fd.get('tipe'), form, sig);
         } catch (err) {
           toast(err.message || 'Gagal menyimpan form', 'err');
+        }
+      });
+    }
+  });
+}
+
+// Corrects a saved SOAP record — reused by both Riwayat Kunjungan (patient
+// detail) and Kecelakaan Kerja, since a kecelakaan_kerja case is the exact
+// same visits row: editing it here is what keeps both menus in sync
+// automatically, there's nothing separate to reconcile. Obat/resep already
+// dispensed is shown read-only — changing what was actually given needs a
+// stock reconciliation that belongs in Apotek's Koreksi Stok, not a silent
+// side-effect of correcting a note here.
+export function openEditVisitModal(visit, onDone) {
+  const diseaseCodes = getDiseaseCodes();
+  const icdSelected = (visit.diagnosa || []).map(d => ({ code: d.code, desc: d.desc }));
+
+  openModal(`Edit Pemeriksaan — ${visit.patients?.nama || ''} (${fmtDate(visit.tanggal)})`, `
+    <form id="editVisitForm">
+      <div class="grid cols-2" style="margin-bottom:14px">
+        <div class="field"><label>No. RM</label><input value="${escapeHtml(visit.patients?.no_rm || '')}" disabled></div>
+        <div class="field"><label>Jenis Kunjungan</label>
+          <select name="jenisKunjungan" id="evJenisKunjungan">
+            <option value="sakit" ${visit.jenis_kunjungan === 'sakit' ? 'selected' : ''}>Sakit</option>
+            <option value="kecelakaan_kerja" ${visit.jenis_kunjungan === 'kecelakaan_kerja' ? 'selected' : ''}>Kecelakaan Kerja</option>
+            <option value="kontrol" ${visit.jenis_kunjungan === 'kontrol' ? 'selected' : ''}>Kontrol</option>
+            <option value="vitamin_mcu" ${visit.jenis_kunjungan === 'vitamin_mcu' ? 'selected' : ''}>Vitamin / MCU / Minta Obat</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="evKerjaBlock" style="display:${visit.jenis_kunjungan === 'kecelakaan_kerja' ? '' : 'none'}">
+        <div class="panel" style="background:var(--surface-2)">
+          <h2>Detail Kecelakaan Kerja</h2>
+          <div class="grid cols-3">
+            <div class="field"><label>Tingkat Keparahan *</label>
+              <select name="tingkat">
+                <option value="FA" ${visit.kecelakaan_kerja?.tingkat === 'FA' ? 'selected' : ''}>First Aid (FA) — 0 hari istirahat</option>
+                <option value="MA" ${visit.kecelakaan_kerja?.tingkat === 'MA' ? 'selected' : ''}>Medical Aid (MA) — 1-3 hari istirahat</option>
+                <option value="LTI" ${visit.kecelakaan_kerja?.tingkat === 'LTI' ? 'selected' : ''}>Lost Time Injury (LTI) — &gt;3 hari istirahat</option>
+              </select>
+            </div>
+            <div class="field"><label>Tanggal Kejadian</label><input type="date" name="tanggalKejadian" value="${visit.kecelakaan_kerja?.tanggalKejadian || ''}"></div>
+            <div class="field"><label>Jam Kejadian</label><input type="time" name="jamKejadian" value="${visit.kecelakaan_kerja?.jamKejadian || ''}"></div>
+          </div>
+          <div class="grid cols-2">
+            <div class="field"><label>Penyebab / Terkena</label><input name="terkena" value="${escapeHtml(visit.kecelakaan_kerja?.terkena || '')}"></div>
+            <div class="field"><label>Lokasi Kejadian</label><input name="lokasiKejadian" value="${escapeHtml(visit.kecelakaan_kerja?.lokasiKejadian || '')}"></div>
+          </div>
+          <div class="field full"><label>Kronologi Kejadian</label><textarea name="kronologi">${escapeHtml(visit.kecelakaan_kerja?.kronologi || '')}</textarea></div>
+          <div class="field full"><label>Tindakan</label><textarea name="tindakan">${escapeHtml(visit.kecelakaan_kerja?.tindakan || '')}</textarea></div>
+        </div>
+      </div>
+
+      <div class="field full"><label>S — Subjective</label><textarea name="subjective">${escapeHtml(visit.subjective || '')}</textarea></div>
+
+      <div class="field full">
+        <label>O — Objective: Tanda Vital</label>
+        <div class="grid cols-4">
+          ${VITAL_FIELDS.map(f => `<div class="field"><label>${escapeHtml(f.label)} (${escapeHtml(f.unit)})</label><input type="number" step="any" data-vital="${f.key}" value="${visit.vitals?.[f.key] ?? ''}"></div>`).join('')}
+        </div>
+      </div>
+      <div class="field full"><label>Pemeriksaan Fisik Lainnya</label><textarea name="objective">${escapeHtml(visit.objective || '')}</textarea></div>
+
+      <div class="field full">
+        <label>A — Assessment (Diagnosa)</label>
+        <input type="text" id="evIcdSearch" placeholder="Cari kode ICD-10 atau nama penyakit...">
+        <div class="icd-search-results" id="evIcdResults" style="display:none"></div>
+        <div class="icd-tags" id="evIcdTags"></div>
+      </div>
+
+      <div class="field full"><label>P — Plan</label><textarea name="plan">${escapeHtml(visit.plan || '')}</textarea></div>
+
+      <div class="grid cols-2">
+        <div class="field"><label>Disposisi *</label>
+          <select name="disposisi">
+            ${['rawat_jalan', 'observasi', 'rawat_inap', 'rujuk_keluar'].map(v => `<option value="${v}" ${visit.disposisi === v ? 'selected' : ''}>${{ rawat_jalan: 'Rawat Jalan', observasi: 'Observasi', rawat_inap: 'Rawat Inap', rujuk_keluar: 'Rujuk Keluar' }[v]}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Lama Observasi/Rawat Inap (hari)</label><input type="number" name="lamaObservasi" min="0" value="${visit.lama_observasi_hari ?? 0}"></div>
+      </div>
+
+      ${visit.visit_obat?.length ? `
+        <div class="field full">
+          <label>Obat / Alkes yang Sudah Diberikan (tidak bisa diubah di sini)</label>
+          <div class="table-wrap"><table><thead><tr><th>Obat</th><th>Qty</th><th>Subtotal</th></tr></thead>
+            <tbody>${visit.visit_obat.map(o => `<tr><td>${escapeHtml(o.drugs?.nama || '-')}</td><td>${o.qty}</td><td>Rp ${Number(o.subtotal || 0).toLocaleString('id-ID')}</td></tr>`).join('')}</tbody>
+          </table></div>
+          <p class="desc" style="margin-top:6px">Untuk mengubah obat yang sudah diberikan (mis. salah input jumlah), gunakan "Koreksi Stok" di menu Apotek pada item terkait.</p>
+        </div>` : ''}
+
+      <div class="field full"><label>Dokter / Petugas Pemeriksa</label><input name="dokter" value="${escapeHtml(visit.dokter || '')}"></div>
+
+      <div class="field full" style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px">
+        <button type="button" class="btn btn-outline" id="cancelBtn">Batal</button>
+        <button type="submit" class="btn btn-primary">Simpan Perubahan</button>
+      </div>
+    </form>
+  `, {
+    onMount: (body, close) => {
+      body.querySelector('#cancelBtn').addEventListener('click', close);
+
+      body.querySelector('#evJenisKunjungan').addEventListener('change', e => {
+        body.querySelector('#evKerjaBlock').style.display = e.target.value === 'kecelakaan_kerja' ? '' : 'none';
+      });
+
+      const icdTags = body.querySelector('#evIcdTags');
+      function drawIcdTags() {
+        icdTags.innerHTML = icdSelected.map((d, i) => `
+          <span class="icd-tag"><b>${escapeHtml(d.code)}</b> ${escapeHtml(d.desc)} <button type="button" data-i="${i}">&times;</button></span>
+        `).join('') || '<span class="muted" style="font-size:.8rem">Belum ada diagnosa dipilih</span>';
+        icdTags.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { icdSelected.splice(Number(b.dataset.i), 1); drawIcdTags(); }));
+      }
+      drawIcdTags();
+
+      const icdSearch = body.querySelector('#evIcdSearch');
+      const icdResults = body.querySelector('#evIcdResults');
+      icdSearch.addEventListener('input', debounce(() => {
+        const results = api.searchDiseaseCodes(diseaseCodes, icdSearch.value, 15);
+        if (!results.length) { icdResults.style.display = 'none'; return; }
+        icdResults.style.display = '';
+        icdResults.innerHTML = results.map(r => `<div class="icd-item" data-code="${escapeHtml(r.code)}" data-desc="${escapeHtml(r.desc)}"><b>${escapeHtml(r.code)}</b> — ${escapeHtml(r.desc)} <span class="muted">(${escapeHtml(r.category)})</span></div>`).join('');
+        icdResults.querySelectorAll('.icd-item').forEach(item => item.addEventListener('click', () => {
+          const code = item.dataset.code, desc = item.dataset.desc;
+          if (!icdSelected.some(d => d.code === code)) icdSelected.push({ code, desc });
+          icdSearch.value = '';
+          icdResults.style.display = 'none';
+          drawIcdTags();
+        }));
+      }, 150));
+
+      body.querySelector('#editVisitForm').addEventListener('submit', async e => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const vitals = {};
+        body.querySelectorAll('[data-vital]').forEach(input => { if (input.value !== '') vitals[input.dataset.vital] = Number(input.value); });
+
+        const jenisKunjungan = fd.get('jenisKunjungan');
+        const payload = {
+          jenis_kunjungan: jenisKunjungan, subjective: fd.get('subjective').trim(), objective: fd.get('objective').trim(),
+          diagnosa: icdSelected, plan: fd.get('plan').trim(), disposisi: fd.get('disposisi'),
+          lama_observasi_hari: Number(fd.get('lamaObservasi')) || 0, dokter: fd.get('dokter').trim(),
+          vitals, kecelakaan_kerja: null
+        };
+        if (jenisKunjungan === 'kecelakaan_kerja') {
+          payload.kecelakaan_kerja = {
+            tingkat: fd.get('tingkat'), tanggalKejadian: fd.get('tanggalKejadian'), jamKejadian: fd.get('jamKejadian'),
+            terkena: fd.get('terkena').trim(), lokasiKejadian: fd.get('lokasiKejadian').trim(),
+            kronologi: fd.get('kronologi').trim(), tindakan: fd.get('tindakan').trim()
+          };
+        }
+
+        try {
+          await api.updateVisit(visit.id, payload);
+          toast('Perubahan pemeriksaan tersimpan');
+          close();
+          onDone();
+        } catch (err) {
+          toast(err.message || 'Gagal menyimpan perubahan', 'err');
         }
       });
     }

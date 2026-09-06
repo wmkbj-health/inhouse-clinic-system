@@ -39,12 +39,12 @@ export async function renderApotek(root) {
 
   root.innerHTML = `
     <div class="view-head">
-      <div><h1>Apotek</h1><p class="desc">Obat & alat kesehatan — FEFO, harga, peringatan expired dan stok minimum</p></div>
+      <div><h1>Apotek</h1><p class="desc">Kartu Stok Obat & Alkes — pengelolaan FEFO, stok opname, dan pelaporan sesuai standar pelayanan kefarmasian (Permenkes)</p></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-outline" id="btnSig">Nama Tanda Tangan</button>
         <button class="btn btn-outline" id="btnRequest">Permintaan Obat</button>
-        <button class="btn btn-outline" id="btnRko">RKO</button>
-        <button class="btn btn-outline" id="btnPrint">Cetak Stocktake</button>
+        <button class="btn btn-outline" id="btnRko">RKO (Rencana Kebutuhan Obat)</button>
+        <button class="btn btn-outline" id="btnPrint">Cetak Laporan Stok Opname</button>
         <button class="btn btn-outline" id="btnTx">Penerimaan Obat (Batch Baru)</button>
         <button class="btn btn-outline" id="btnReceiptHistory">Riwayat Penerimaan</button>
         <button class="btn btn-outline" id="btnExpiryWriteoff">Berita Acara Kadaluwarsa</button>
@@ -56,7 +56,7 @@ export async function renderApotek(root) {
       <select id="yearFilter"></select>
       <span class="muted" style="font-size:.8rem">Memengaruhi kolom Penerimaan/Pemakaian/Rata-rata &amp; cetak stocktake</span>
     </div>
-    <div class="grid cols-3" id="apotekStats" style="margin-bottom:20px"></div>
+    <div class="grid cols-4" id="apotekStats" style="margin-bottom:20px"></div>
     <div class="panel">
       <h2>Daftar Obat & Alkes (FEFO) <span class="muted" id="drugCount"></span></h2>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
@@ -69,7 +69,8 @@ export async function renderApotek(root) {
         </select>
         <select id="drugWarnFilter" style="max-width:220px">
           <option value="">Semua Status</option>
-          <option value="minimum">Perlu Pesan Ulang</option>
+          <option value="habis">Stok Habis</option>
+          <option value="minimum">Stok Kritis (Perlu Pesan Ulang)</option>
           <option value="expiring">Akan Kadaluarsa (30 hari)</option>
           <option value="expired">Sudah Kadaluarsa</option>
         </select>
@@ -77,7 +78,7 @@ export async function renderApotek(root) {
       <div class="table-wrap"><table>
         <thead><tr>
           <th>Kode</th><th>Nama (Paten)</th><th>Jenis</th><th>Stok Awal</th><th>Penerimaan</th><th>Pemakaian</th>
-          <th>Rata2/Hari</th><th>Stok Saat Ini</th><th>Exp. Terdekat</th><th>Harga Jual</th><th>Status</th><th></th>
+          <th>Rata2/Hari</th><th>Stok Akhir</th><th>Exp. Terdekat</th><th>Harga Jual</th><th>Status</th><th></th>
         </tr></thead>
         <tbody id="drugRows"></tbody>
       </table></div>
@@ -108,11 +109,16 @@ export async function renderApotek(root) {
     drawAll();
   }
 
+  // Priority mirrors the printed Laporan Stok Opname (js/print.js stockStatus):
+  // stok habis is the most urgent operational state (tidak bisa dilayani sama
+  // sekali), diikuti kadaluarsa, lalu stok kritis di bawah batas minimum,
+  // lalu peringatan mendekati kadaluarsa.
   function statusOf(d) {
+    if (d.stok <= 0) return { key: 'habis', label: 'Stok Habis', cls: 'badge-danger' };
     const days = d.nextExpiry ? daysUntil(d.nextExpiry) : null;
     if (days !== null && days < 0) return { key: 'expired', label: 'Kadaluarsa', cls: 'badge-danger' };
+    if (d.stok <= d.stok_minimum) return { key: 'minimum', label: 'Stok Kritis (Pesan Ulang)', cls: 'badge-warn' };
     if (days !== null && days <= 30) return { key: 'expiring', label: `Exp ${days} hari lagi`, cls: 'badge-warn' };
-    if (d.stok <= d.stok_minimum) return { key: 'minimum', label: 'Perlu Pesan Ulang', cls: 'badge-warn' };
     return { key: 'ok', label: 'Aman', cls: 'badge-ok' };
   }
   function daysUntil(dateStr) {
@@ -122,11 +128,13 @@ export async function renderApotek(root) {
   }
 
   function drawStats() {
-    const minimum = drugs.filter(d => d.stok <= d.stok_minimum);
+    const habis = drugs.filter(d => d.stok <= 0);
+    const minimum = drugs.filter(d => d.stok > 0 && d.stok <= d.stok_minimum);
     const expiringOrExpired = drugs.filter(d => d.nextExpiry && daysUntil(d.nextExpiry) <= 30);
     root.querySelector('#apotekStats').innerHTML = `
       <div class="card stat primary"><div class="label">Total Item</div><div class="value">${drugs.length}</div></div>
-      <div class="card stat warn"><div class="label">Perlu Pesan Ulang</div><div class="value">${minimum.length}</div><div class="hint">Stok ≤ batas minimum</div></div>
+      <div class="card stat danger"><div class="label">Stok Habis</div><div class="value">${habis.length}</div><div class="hint">Tidak dapat dilayani, perlu penerimaan segera</div></div>
+      <div class="card stat warn"><div class="label">Stok Kritis (Pesan Ulang)</div><div class="value">${minimum.length}</div><div class="hint">Stok ≤ batas minimum, belum habis</div></div>
       <div class="card stat danger"><div class="label">Kadaluarsa / Akan Kadaluarsa</div><div class="value">${expiringOrExpired.length}</div><div class="hint">Dalam 30 hari ke depan atau sudah lewat</div></div>
     `;
     root.querySelector('#drugCount').textContent = `(${drugs.length})`;
@@ -235,11 +243,11 @@ export async function renderApotek(root) {
 }
 
 function openStocktakePrintModal(drugs, filterMonth, filterYear) {
-  openModal('Cetak Stocktake', `
+  openModal('Cetak Laporan Stok Opname', `
     <p class="desc" style="margin-bottom:14px">Pilih jenis item yang ingin dicetak:</p>
     <div style="display:flex;gap:10px;justify-content:center">
-      <button class="btn btn-primary" id="btnObat">Stocktake Obat</button>
-      <button class="btn btn-primary" id="btnAlkes">Stocktake Alkes / BHP</button>
+      <button class="btn btn-primary" id="btnObat">Stok Opname Obat</button>
+      <button class="btn btn-primary" id="btnAlkes">Stok Opname Alkes & BHP</button>
     </div>
   `, {
     onMount: async (body, close) => {

@@ -64,21 +64,25 @@ export async function createPatient(payload) {
   return row;
 }
 
-// Looks for a likely-duplicate patient before registering a new one: same
-// NIK (a real duplicate, NIK is unique to a person), or same name + date of
-// birth (very likely the same person mistyped/re-registered). Returns the
-// existing row so the UI can show who it matched, or null if none found.
-export async function findDuplicatePatient(companyId, { nik, nama, tglLahir }) {
+// No. RM is this app's one canonical identifier for "this is the same
+// patient" — a name alone never is, since two different people can share a
+// name. So before registering, surface every existing patient with the
+// same name (or the same NIK, which IS unique to a person) and let the
+// user pick: reuse that RM (same person, just add a new visit under their
+// existing record) or confirm it's a different person and register fresh.
+// Same name + different RM is explicitly fine — it only becomes "the same
+// patient twice" if staff pick the wrong branch here.
+export async function findPossibleDuplicatePatients(companyId, { nik, nama }) {
+  const matches = new Map();
   if (nik) {
-    const byNik = unwrap(await supabase.from('patients').select('id, nama, no_rm, nik, tgl_lahir').eq('company_id', companyId).eq('nik', nik).limit(1));
-    if (byNik.length) return byNik[0];
+    const byNik = unwrap(await supabase.from('patients').select('id, nama, no_rm, nik, tgl_lahir, jenis_kelamin, departemen').eq('company_id', companyId).eq('nik', nik));
+    byNik.forEach(p => matches.set(p.id, p));
   }
-  if (nama && tglLahir) {
-    const byNameDob = unwrap(await supabase.from('patients').select('id, nama, no_rm, nik, tgl_lahir')
-      .eq('company_id', companyId).eq('tgl_lahir', tglLahir).ilike('nama', nama).limit(1));
-    if (byNameDob.length) return byNameDob[0];
+  if (nama) {
+    const byName = unwrap(await supabase.from('patients').select('id, nama, no_rm, nik, tgl_lahir, jenis_kelamin, departemen').eq('company_id', companyId).ilike('nama', nama));
+    byName.forEach(p => matches.set(p.id, p));
   }
-  return null;
+  return Array.from(matches.values());
 }
 
 export async function getPatient(id) {
@@ -394,8 +398,26 @@ export async function createVisit(visitPayload, obatLines) {
   return visit;
 }
 
+// Corrects a saved SOAP record (subjective/objective/plan, diagnosa,
+// disposisi, vitals, jenis_kunjungan, kecelakaan_kerja detail — this is
+// what Kecelakaan Kerja's own "Edit" reuses, since it's the exact same
+// visits row, so a correction here shows up everywhere that visit is
+// read from). Deliberately does NOT touch obat/visit_obat/biaya_total —
+// changing dispensed medication after the fact needs its own stock
+// reconciliation (return old batches, FEFO the new ones), which belongs
+// in Apotek's "Koreksi Stok" instead of silently happening from here.
+export async function updateVisit(id, payload) {
+  const row = await unwrap(await supabase.from('visits').update(payload).eq('id', id).select().single());
+  logActivity(row.company_id, 'update_visit', 'visits', id, { jenisKunjungan: row.jenis_kunjungan });
+  return row;
+}
+
 export async function getVisitsByPatient(patientId) {
   return unwrap(await supabase.from('visits').select('*, visit_obat(*, drugs(nama))').eq('patient_id', patientId).order('tanggal', { ascending: false }));
+}
+
+export async function getVisit(id) {
+  return unwrap(await supabase.from('visits').select('*, patients(nama, no_rm, company_id), visit_obat(*, drugs(nama))').eq('id', id).single());
 }
 
 export async function listRecentVisits(limit = 200) {
