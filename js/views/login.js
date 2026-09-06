@@ -12,6 +12,13 @@ const COMPANY_LOGOS = [
 export function renderLogin(root, onSuccess) {
   root.innerHTML = `
     <div class="login-screen">
+      <div class="login-bg-sun"></div>
+      <div class="login-bg-clouds">
+        <span class="cloud c1"></span><span class="cloud c2"></span><span class="cloud c3"></span>
+      </div>
+      <div class="login-bg-sparkle">
+        ${Array.from({ length: 14 }).map((_, i) => `<span class="spark s${i % 7}"></span>`).join('')}
+      </div>
       <div class="login-card">
         <div class="login-brand">
           <img src="assets/app-icon.png" alt="Logo">

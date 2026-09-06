@@ -36,6 +36,10 @@ html {
      doesn't add a scrollbar mid-interaction and shove content sideways. */
   scrollbar-gutter: stable;
   overflow-x: hidden;
+  /* Stop trackpad/touch edge-swipes from triggering browser back/forward
+     navigation, which visually looks like the whole page (sidebar included)
+     sliding left/right. */
+  overscroll-behavior-x: none;
 }
 body {
   font-family: 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
@@ -45,6 +49,7 @@ body {
   display: flex;
   min-height: 100vh;
   overflow-x: hidden;
+  overscroll-behavior-x: none;
 }
 
 #app-root { flex: 1; width: 100%; min-width: 0; }
@@ -52,26 +57,76 @@ body {
 .login-screen {
   width: 100%; min-height: 100vh; display: flex; align-items: center; justify-content: center;
   padding: 24px; position: relative; overflow: hidden;
-  background:
-    radial-gradient(circle at 80% 8%, rgba(255,214,120,.35), transparent 40%),
-    linear-gradient(180deg, #0b2e2a 0%, #103d33 35%, #1a5c3f 62%, #123a2e 100%);
+  background: linear-gradient(180deg, #dff2e6 0%, #a9d9c4 22%, #5fae86 42%, #2f7a5c 62%, #164d3c 82%, #0c3329 100%);
 }
-/* Soft haze/fog band near the horizon, typical of early-morning plantation photos */
+/* Glowing sunrise, gently pulsing and drifting for a living-sky feel */
+.login-bg-sun {
+  position: absolute; z-index: 0; pointer-events: none;
+  top: 4%; right: 10%; width: 260px; height: 260px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,232,170,.85), rgba(255,224,150,.35) 45%, rgba(255,224,150,0) 72%);
+  filter: blur(2px);
+  animation: sunPulse 7s ease-in-out infinite;
+}
+@keyframes sunPulse {
+  0%, 100% { transform: scale(1) translate(0, 0); opacity: .9; }
+  50% { transform: scale(1.12) translate(-6px, 8px); opacity: 1; }
+}
+/* Soft drifting clouds crossing the sky */
+.login-bg-clouds { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.cloud {
+  position: absolute; border-radius: 50%; background: rgba(255,255,255,.55); filter: blur(6px);
+}
+.cloud.c1 { width: 180px; height: 46px; top: 12%; left: -20%; animation: driftCloud 46s linear infinite; }
+.cloud.c2 { width: 130px; height: 34px; top: 22%; left: -30%; opacity: .7; animation: driftCloud 64s linear infinite -18s; }
+.cloud.c3 { width: 100px; height: 28px; top: 8%; left: -25%; opacity: .5; animation: driftCloud 80s linear infinite -40s; }
+@keyframes driftCloud { from { transform: translateX(0); } to { transform: translateX(140vw); } }
+/* Soft morning haze near the horizon, gently breathing */
 .login-screen::before {
   content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0;
-  background: linear-gradient(180deg, transparent 40%, rgba(230,245,225,.10) 58%, rgba(230,245,225,.16) 66%, transparent 78%);
+  background: linear-gradient(180deg, transparent 30%, rgba(255,255,255,.22) 46%, rgba(255,255,255,.3) 54%, transparent 70%);
+  animation: hazeBreathe 9s ease-in-out infinite;
 }
-/* Rows of industrial-plantation tree silhouettes (HTI), layered for depth */
+@keyframes hazeBreathe { 0%, 100% { opacity: .85; } 50% { opacity: 1; } }
+/* Layered rows of industrial-plantation trees (HTI), far -> near for parallax depth,
+   swaying gently like a light breeze moving through the plantation */
 .login-screen::after {
   content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0;
   background-repeat: repeat-x, repeat-x, repeat-x;
-  background-position: bottom -6px left 0, bottom 62px left -30px, bottom 118px left 15px;
-  background-size: 148px 210px, 128px 170px, 108px 140px;
-  opacity: 1;
+  background-position: bottom 34% left 0, bottom 14% left -60px, bottom -2% left 30px;
+  background-size: 700px auto, 560px auto, 480px auto;
   background-image:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='148' height='210' viewBox='0 0 148 210'%3E%3Cg fill='%230a2620'%3E%3Crect x='66' y='150' width='16' height='60'/%3E%3Cpolygon points='74,30 40,110 108,110'/%3E%3Cpolygon points='74,60 34,145 114,145'/%3E%3Cpolygon points='74,95 28,180 120,180'/%3E%3C/g%3E%3C/svg%3E"),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='170' viewBox='0 0 128 170'%3E%3Cg fill='%230f3a30'%3E%3Crect x='57' y='120' width='14' height='50'/%3E%3Cpolygon points='64,25 34,90 94,90'/%3E%3Cpolygon points='64,50 30,118 98,118'/%3E%3Cpolygon points='64,78 25,148 103,148'/%3E%3C/g%3E%3C/svg%3E"),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='108' height='140' viewBox='0 0 108 140'%3E%3Cg fill='%2315493c'%3E%3Crect x='48' y='98' width='12' height='40'/%3E%3Cpolygon points='54,20 28,74 80,74'/%3E%3Cpolygon points='54,42 24,96 84,96'/%3E%3Cpolygon points='54,64 20,120 88,120'/%3E%3C/g%3E%3C/svg%3E");
+    url('../assets/login-bg/trees-far.png'),
+    url('../assets/login-bg/trees-mid.png'),
+    url('../assets/login-bg/trees-near.png');
+  filter: saturate(1.05);
+  animation: treeSway 11s ease-in-out infinite;
+}
+@keyframes treeSway {
+  0%, 100% { background-position: bottom 34% left 0, bottom 14% left -60px, bottom -2% left 30px; }
+  50% { background-position: bottom 34% left 14px, bottom 14% left -46px, bottom -2% left 44px; }
+}
+/* Sunlit floating particles (pollen/dust) drifting slowly upward */
+.login-bg-sparkle { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.spark {
+  position: absolute; width: 4px; height: 4px; border-radius: 50%;
+  background: rgba(255,255,255,.85); box-shadow: 0 0 6px 1px rgba(255,255,255,.6);
+  bottom: -10px; animation: sparkFloat 12s ease-in infinite;
+}
+.spark.s0 { left: 8%; animation-duration: 13s; animation-delay: 0s; }
+.spark.s1 { left: 20%; animation-duration: 16s; animation-delay: 2s; width: 3px; height: 3px; }
+.spark.s2 { left: 34%; animation-duration: 11s; animation-delay: 4s; }
+.spark.s3 { left: 50%; animation-duration: 15s; animation-delay: 1s; width: 3px; height: 3px; }
+.spark.s4 { left: 64%; animation-duration: 14s; animation-delay: 6s; }
+.spark.s5 { left: 78%; animation-duration: 12s; animation-delay: 3s; width: 3px; height: 3px; }
+.spark.s6 { left: 90%; animation-duration: 17s; animation-delay: 5s; }
+@keyframes sparkFloat {
+  0% { transform: translate(0, 0); opacity: 0; }
+  10% { opacity: .9; }
+  90% { opacity: .5; }
+  100% { transform: translate(12px, -92vh); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .login-bg-sun, .cloud, .login-screen::before, .login-screen::after, .spark { animation: none !important; }
 }
 .login-card {
   position: relative; z-index: 1; width: 100%; max-width: 400px;
@@ -85,11 +140,11 @@ body {
 .login-hint { font-size: .76rem; color: var(--muted); text-align: center; margin-top: 16px; }
 .login-companies { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border); }
 .login-companies-label { text-align: center; font-size: .68rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 10px; }
-.login-companies-row { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; }
-.login-companies-row img { height: 36px; width: auto; max-width: 72px; object-fit: contain; opacity: .95; }
+.login-companies-row { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; }
+.login-companies-row img { height: 22px; width: auto; max-width: 46px; object-fit: contain; opacity: .92; }
 @media (max-width: 480px) {
   .login-card { padding: 26px 20px 20px; }
-  .login-companies-row img { height: 30px; }
+  .login-companies-row img { height: 18px; max-width: 38px; }
 }
 
 a { color: inherit; text-decoration: none; }
@@ -100,17 +155,22 @@ button, input, select, textarea { font-family: inherit; font-size: .95rem; color
 
 .sidebar {
   width: 250px;
+  min-width: 250px;
+  max-width: 250px;
   flex-shrink: 0;
   background: linear-gradient(165deg, var(--primary-2), var(--accent-2) 130%);
   color: #fff;
   display: flex;
   flex-direction: column;
   padding: 20px 14px;
-  position: sticky;
+  position: fixed;
+  left: 0;
   top: 0;
   height: 100vh;
+  overflow-y: auto;
   box-shadow: 2px 0 24px rgba(0,0,0,.18);
 }
+.main { margin-left: 250px; }
 .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 20px; }
 .brand img { width: 40px; height: 40px; border-radius: 10px; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
 .brand .name { font-weight: 700; font-size: 1.02rem; line-height: 1.15; }
@@ -304,7 +364,8 @@ tbody tr:last-child td { border-bottom: none; }
 
 @media (max-width: 900px) {
   .sidebar { display: none; }
-  .sidebar.open { display: flex; position: fixed; z-index: 50; inset: 0 auto 0 0; width: 260px; box-shadow: 0 0 40px rgba(0,0,0,.4); }
+  .sidebar.open { display: flex; position: fixed; z-index: 50; inset: 0 auto 0 0; width: 260px; min-width: 260px; max-width: 260px; box-shadow: 0 0 40px rgba(0,0,0,.4); }
+  .main { margin-left: 0; }
   .topbar { display: flex; }
   .view { padding: 18px 14px 50px; }
 }
