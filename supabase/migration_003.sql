@@ -32,9 +32,18 @@ create table if not exists drug_receipts (
   created_by uuid references profiles(id)
 );
 alter table drug_receipts enable row level security;
+drop policy if exists p_drug_receipts_rw on drug_receipts;
 create policy p_drug_receipts_rw on drug_receipts for all
   using (fn_is_active_user() and fn_current_role() in ('dokter','perawat') and fn_has_company_access(company_id))
   with check (fn_is_active_user() and fn_current_role() in ('dokter','perawat') and fn_has_company_access(company_id));
 create index if not exists idx_drug_receipts_company on drug_receipts(company_id, tanggal desc);
 create index if not exists idx_drug_receipts_drug on drug_receipts(drug_id, tanggal desc);
-alter publication supabase_realtime add table drug_receipts;
+
+do $$ begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'drug_receipts'
+  ) then
+    alter publication supabase_realtime add table drug_receipts;
+  end if;
+end $$;
