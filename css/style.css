@@ -309,6 +309,17 @@ tbody tr:hover { background: var(--surface-2); }
 tbody tr:last-child td { border-bottom: none; }
 .empty { text-align: center; color: var(--muted); padding: 34px 10px; font-size: .88rem; }
 
+.loading-state {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  color: var(--muted); font-size: .88rem; padding: 44px 10px;
+}
+.spinner {
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 2.5px solid var(--border); border-top-color: var(--primary);
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
 .badge { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 20px; font-size: .72rem; font-weight: 700; }
 .badge-info { background: rgba(30,136,229,.15); color: var(--primary); }
 .badge-ok { background: rgba(67,160,71,.15); color: var(--accent); }
@@ -399,3 +410,11 @@ tbody tr:last-child td { border-bottom: none; }
 .toast.ok { border-color: var(--accent); }
 .toast.err { border-color: var(--danger); }
 @keyframes fadein { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+.update-toast {
+  position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px;
+  background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow);
+  border-radius: 999px; padding: 10px 10px 10px 18px; font-size: .85rem; z-index: 250;
+  animation: fadein .25s ease;
+}

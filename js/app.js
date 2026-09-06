@@ -24,6 +24,8 @@ const ROUTES = {
 
 const appRoot = document.getElementById('app-root');
 
+let shellListenersBound = false;
+
 async function boot() {
   await initAuth();
   if (!isLoggedIn()) {
@@ -90,13 +92,28 @@ function renderShell() {
     });
   }
 
-  window.addEventListener('hashchange', route);
+  if (!shellListenersBound) {
+    // Bound once for the lifetime of the page — renderShell() itself re-runs
+    // on every login, and a plain addEventListener here would otherwise
+    // stack a new global handler each time (each re-firing route() once per
+    // stale login), compounding into real sluggishness on a shared device
+    // that gets logged in/out repeatedly through the day.
+    window.addEventListener('hashchange', route);
+    shellListenersBound = true;
+  }
   route();
   renderAlertBanner();
   refreshNotifications();
 
   if (hasRole('dokter', 'perawat')) {
-    startRealtimeSync(() => { route(); renderAlertBanner(); refreshNotifications(); });
+    startRealtimeSync(() => {
+      // Skip while a modal is open so a remote update never yanks a form
+      // the user is actively filling in out from under them.
+      if (document.querySelector('.modal-bg')) return;
+      route();
+      renderAlertBanner();
+      refreshNotifications();
+    });
   }
 }
 
@@ -190,12 +207,27 @@ function mountCompanySwitcher(el, companies, canShowAll, onPick) {
   }
   updateLabel();
   btn.addEventListener('click', () => { panel.hidden = !panel.hidden; });
-  document.addEventListener('click', e => { if (!el.contains(e.target)) panel.hidden = true; });
+  bindOutsideClickOnce();
   el.querySelectorAll('.cs-item').forEach(item => item.addEventListener('click', () => {
     panel.hidden = true;
     onPick(item.dataset.id);
     updateLabel();
   }));
+}
+
+let outsideClickBound = false;
+function bindOutsideClickOnce() {
+  // Bound once and re-reads the live #companySwitcher/#csPanel each click,
+  // instead of closing over the elements from whichever renderShell() call
+  // happened to mount it — the previous version rebuilt this closure (and
+  // added a fresh permanent document listener) on every login.
+  if (outsideClickBound) return;
+  outsideClickBound = true;
+  document.addEventListener('click', e => {
+    const panel = document.getElementById('csPanel');
+    const switcherEl = document.getElementById('companySwitcher');
+    if (panel && !panel.hidden && switcherEl && !switcherEl.contains(e.target)) panel.hidden = true;
+  });
 }
 
 function buildNav() {
@@ -212,7 +244,7 @@ async function route() {
   const navEl = document.getElementById('nav');
   navEl.querySelectorAll('a').forEach(a => a.classList.toggle('active', a.dataset.key === Object.keys(ROUTES).find(k => ROUTES[k] === entry)));
   const root = document.getElementById('view-root');
-  root.innerHTML = '<div class="empty">Memuat...</div>';
+  root.innerHTML = '<div class="loading-state"><span class="spinner"></span> Memuat...</div>';
   try {
     await entry.render(root);
   } catch (err) {
@@ -223,29 +255,45 @@ async function route() {
 
 boot();
 
+// The service worker itself does no caching (see service-worker.js) — it
+// only exists so the app is installable as a PWA. A new version therefore
+// never masks stale CSS/JS the way a caching SW can; we still surface an
+// "update available" toast rather than forcing location.reload(), so a
+// deploy landing mid-click never gets mistaken for the app "not responding".
 if ('serviceWorker' in navigator) {
-  let refreshing = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (refreshing) return;
-    refreshing = true;
-    location.reload();
-  });
   window.addEventListener('load', async () => {
     try {
       const reg = await navigator.serviceWorker.register('./service-worker.js');
-      reg.addEventListener('updatefound', () => {
-        const installing = reg.installing;
-        if (!installing) return;
-        installing.addEventListener('statechange', () => {
-          if (installing.state === 'installed' && navigator.serviceWorker.controller) {
-            installing.postMessage('SKIP_WAITING');
+      const notifyUpdateReady = worker => {
+        worker.addEventListener('statechange', () => {
+          if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+            showUpdateToast(() => { worker.postMessage('SKIP_WAITING'); });
           }
         });
+      };
+      if (reg.waiting && navigator.serviceWorker.controller) showUpdateToast(() => reg.waiting.postMessage('SKIP_WAITING'));
+      reg.addEventListener('updatefound', () => { if (reg.installing) notifyUpdateReady(reg.installing); });
+
+      let reloadedOnce = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (reloadedOnce) return;
+        reloadedOnce = true;
+        location.reload();
       });
+
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') reg.update().catch(() => {});
       });
       setInterval(() => reg.update().catch(() => {}), 5 * 60 * 1000);
     } catch (err) { /* SW unsupported or blocked; app still works without it */ }
   });
+}
+
+function showUpdateToast(onUpdate) {
+  if (document.querySelector('.update-toast')) return;
+  const bar = document.createElement('div');
+  bar.className = 'update-toast';
+  bar.innerHTML = `<span>Versi baru tersedia.</span><button type="button" class="btn btn-sm btn-primary">Perbarui</button>`;
+  bar.querySelector('button').addEventListener('click', () => { bar.remove(); onUpdate(); });
+  document.body.appendChild(bar);
 }
