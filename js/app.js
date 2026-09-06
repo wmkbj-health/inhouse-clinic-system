@@ -61,13 +61,6 @@ function renderShell() {
         </div>
       </aside>
       <div class="main">
-        <div class="topbar">
-          <div class="brand"><img src="assets/app-icon.png" alt="Logo" style="width:30px;height:30px"><b>Inhouse Clinic System</b></div>
-          <div class="topbar-actions">
-            <button class="notif-btn" id="notifBtn" aria-label="Notifikasi" hidden>&#128276;<span class="notif-dot" hidden></span></button>
-            <button class="menu-btn" id="menuBtn" aria-label="Menu">&#9776;</button>
-          </div>
-        </div>
         <div id="alertBanner"></div>
         <div class="view" id="view-root"></div>
       </div>
@@ -89,7 +82,6 @@ function renderShell() {
 
   buildNav();
   document.getElementById('logoutBtn').addEventListener('click', async () => { stopRealtimeSync(); await signOut(); boot(); });
-  document.getElementById('menuBtn').addEventListener('click', () => document.getElementById('sidebar').classList.toggle('open'));
 
   if (hasRole('dokter', 'perawat')) {
     document.querySelectorAll('.notif-btn').forEach(btn => {
@@ -219,7 +211,6 @@ async function route() {
   if (!entry || !hasRole(...entry.roles)) entry = ROUTES.dashboard;
   const navEl = document.getElementById('nav');
   navEl.querySelectorAll('a').forEach(a => a.classList.toggle('active', a.dataset.key === Object.keys(ROUTES).find(k => ROUTES[k] === entry)));
-  document.getElementById('sidebar').classList.remove('open');
   const root = document.getElementById('view-root');
   root.innerHTML = '<div class="empty">Memuat...</div>';
   try {

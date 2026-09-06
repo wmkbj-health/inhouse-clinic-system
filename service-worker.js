@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ics-clinic-v4';
+const CACHE_NAME = 'ics-clinic-v5';
 const STATIC_ASSETS = [
   './manifest.json',
   './css/style.css',
@@ -30,36 +30,19 @@ self.addEventListener('message', event => {
   if (event.data === 'SKIP_WAITING') self.skipWaiting();
 });
 
-// Network-first for navigations and app code (HTML/JS/JSON) so a deploy is
-// picked up on the very next load; cache-first for static images/CSS only.
+// Network-first for every same-origin GET so a deploy is picked up on the
+// very next load; the cache is only a fallback for when the network fails
+// (offline / flaky connection), never the primary source.
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
   if (url.origin !== location.origin) return;
 
-  const isAppCode = event.request.mode === 'navigate' ||
-    /\.(js|json|html)$/.test(url.pathname) ||
-    url.pathname === '/' || url.pathname.endsWith('/');
-
-  if (isAppCode) {
-    event.respondWith(
-      fetch(event.request).then(res => {
-        const clone = res.clone();
-        caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-        return res;
-      }).catch(() => caches.match(event.request))
-    );
-    return;
-  }
-
   event.respondWith(
-    caches.match(event.request).then(cached => {
-      if (cached) return cached;
-      return fetch(event.request).then(res => {
-        const clone = res.clone();
-        caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-        return res;
-      }).catch(() => cached);
-    })
+    fetch(event.request).then(res => {
+      const clone = res.clone();
+      caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+      return res;
+    }).catch(() => caches.match(event.request))
   );
 });

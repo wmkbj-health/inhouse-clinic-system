@@ -130,15 +130,6 @@ button, input, select, textarea { font-family: inherit; font-size: .95rem; color
 .nav a.active::before { content: ''; position: absolute; left: -14px; top: 50%; transform: translateY(-50%); width: 4px; height: 20px; border-radius: 0 4px 4px 0; background: #fff; }
 .sidebar-foot { font-size: .68rem; opacity: .75; padding: 10px 8px 0; }
 
-.topbar {
-  display: none;
-  align-items: center; justify-content: space-between;
-  background: var(--surface); border-bottom: 1px solid var(--border);
-  padding: 10px 14px; position: sticky; top: 0; z-index: 20;
-}
-.topbar .brand { padding: 0; }
-.topbar-actions { display: flex; align-items: center; gap: 10px; }
-.menu-btn { background: none; border: none; font-size: 1.3rem; color: var(--text); cursor: pointer; }
 .notif-btn {
   position: relative; background: none; border: none; font-size: 1.15rem; cursor: pointer;
   color: var(--text); padding: 4px 6px; line-height: 1;
@@ -303,9 +294,7 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 @media (max-width: 900px) {
-  .sidebar { display: none; }
-  .sidebar.open { display: flex; position: fixed; z-index: 50; inset: 0 auto 0 0; width: 260px; box-shadow: 0 0 40px rgba(0,0,0,.4); }
-  .topbar { display: flex; }
+  .sidebar { width: 210px; padding: 16px 10px; }
   .view { padding: 18px 14px 50px; }
 }
 
