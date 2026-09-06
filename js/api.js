@@ -359,8 +359,12 @@ export async function dashboardYearData(year, statusPegawai = 'all') {
       kpiFilter(supabase.from('v_stock_warnings').select('*')).then(unwrap)
     ]);
     const inYear = row => String(row.bulan).startsWith(yearPrefix);
+    const kunjunganInYear = kunjungan.filter(inYear);
+    const monthTotals = emptyMonthBuckets(year);
+    for (const row of kunjunganInYear) monthTotals[String(row.bulan).slice(0, 7)] += Number(row.total_kunjungan);
     return {
-      kunjungan: kunjungan.filter(inYear), topDiseases: topDiseases.filter(inYear),
+      kunjungan: kunjunganInYear, kunjunganBulanan: monthBucketsToArray(monthTotals),
+      topDiseases: topDiseases.filter(inYear),
       topDeptDiseases: topDeptDiseases.filter(inYear), topDrugs: topDrugs.filter(inYear),
       sks: sks.filter(inYear), rujukan: rujukan.filter(inYear), kk: kk.filter(inYear), stock
     };
@@ -374,8 +378,11 @@ export async function dashboardYearData(year, statusPegawai = 'all') {
   const diseaseMap = {}, deptDiseaseMap = {}, drugMap = {};
   let totalKunjungan = 0, totalKk = 0;
   const kkByTingkat = { FA: 0, MA: 0, LTI: 0 };
+  const monthTotals = emptyMonthBuckets(year);
   for (const v of visits) {
     totalKunjungan++;
+    const bucket = String(v.tanggal).slice(0, 7);
+    if (bucket in monthTotals) monthTotals[bucket]++;
     for (const d of v.diagnosa || []) {
       diseaseMap[d.code] = diseaseMap[d.code] || { kode: d.code, penyakit: d.desc, jumlah: 0 };
       diseaseMap[d.code].jumlah++;
@@ -402,13 +409,25 @@ export async function dashboardYearData(year, statusPegawai = 'all') {
   const [sksRows, rujRows, stock] = await Promise.all([unwrap(await sksQ), unwrap(await rujQ), kpiFilter(supabase.from('v_stock_warnings').select('*')).then(unwrap)]);
 
   return {
-    kunjungan: [{ total_kunjungan: totalKunjungan }],
+    kunjungan: [{ total_kunjungan: totalKunjungan }], kunjunganBulanan: monthBucketsToArray(monthTotals),
     topDiseases: Object.entries(diseaseMap).map(([kode, v]) => ({ kode, ...v })),
     topDeptDiseases: Object.entries(deptDiseaseMap).flatMap(([departemen, diseases]) => Object.entries(diseases).map(([kode, v]) => ({ departemen, kode, ...v }))),
     topDrugs: Object.entries(drugMap).map(([nama, jumlah]) => ({ nama, jumlah })),
     sks: [{ total_sks: sksRows.length }], rujukan: [{ total_rujukan: rujRows.length }],
     kk: Object.entries(kkByTingkat).map(([tingkat, jumlah]) => ({ tingkat, jumlah })), stock
   };
+}
+
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+
+function emptyMonthBuckets(year) {
+  const buckets = {};
+  for (let m = 0; m < 12; m++) buckets[`${year}-${String(m + 1).padStart(2, '0')}`] = 0;
+  return buckets;
+}
+
+function monthBucketsToArray(buckets) {
+  return Object.entries(buckets).map(([bulan, total], i) => ({ bulan, label: MONTH_ABBR[i], total }));
 }
 
 // "Perlu Perhatian": patients flagged for follow-up — abnormal vitals on
@@ -501,17 +520,24 @@ export async function exportSnapshot() {
 }
 
 // ---------------- Print signatures (editable names shown on printed docs) ----------------
+// `signatures` is stored as an object keyed by document type (rujukan, sks,
+// consent, stocktake, drug_request) so each surat/laporan keeps its own
+// independent set of signer rows. Older rows saved it as a flat array
+// (one shared list for every document) or the original fixed
+// nama_dokter/nama_apoteker/nama_admin_hrd columns — both are migrated
+// transparently into a "default" bucket used for any type not yet
+// customized individually.
 export async function getPrintSignatures(companyId) {
   const { data } = await supabase.from('print_signatures').select('*').eq('company_id', companyId).maybeSingle();
-  if (!data) return { company_id: companyId, signatures: [] };
-  if (data.signatures && data.signatures.length) return data;
-  // Back-compat: migrate old fixed nama_dokter/nama_apoteker/nama_admin_hrd fields into the new dynamic list.
+  if (!data) return { company_id: companyId, signatures: {} };
+  if (data.signatures && !Array.isArray(data.signatures)) return { ...data, signatures: data.signatures };
+  if (Array.isArray(data.signatures) && data.signatures.length) return { ...data, signatures: { default: data.signatures } };
   const legacy = [
     data.nama_dokter && { label: 'Dokter', nama: data.nama_dokter },
     data.nama_apoteker && { label: 'Apoteker / Petugas Farmasi', nama: data.nama_apoteker },
     data.nama_admin_hrd && { label: 'Admin/HRD', nama: data.nama_admin_hrd }
   ].filter(Boolean);
-  return { ...data, signatures: legacy };
+  return { ...data, signatures: legacy.length ? { default: legacy } : {} };
 }
 
 export async function savePrintSignatures(companyId, payload) {

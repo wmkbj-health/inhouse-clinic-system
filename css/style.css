@@ -274,12 +274,19 @@ form.form-grid.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
 @media (max-width: 560px) { .sig-row { grid-template-columns: 1fr 1fr 34px; } }
 .field.full { grid-column: 1 / -1; }
 label { font-size: .78rem; color: var(--muted); font-weight: 600; }
-input, select, textarea {
+input:not([type="checkbox"]):not([type="radio"]), select, textarea {
   background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
   border-radius: 9px; padding: 10px 12px; width: 100%;
 }
 textarea { resize: vertical; min-height: 70px; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
+input[type="checkbox"], input[type="radio"] { width: 16px; height: 16px; accent-color: var(--primary); flex-shrink: 0; }
+
+.checkline { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.checkline label {
+  display: flex; align-items: center; gap: 6px; font-weight: 400;
+  color: var(--text); cursor: pointer;
+}
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
@@ -326,6 +333,17 @@ tbody tr:last-child td { border-bottom: none; }
 .badge-warn { background: rgba(245,166,35,.18); color: var(--warn); }
 .badge-danger { background: rgba(239,83,80,.16); color: var(--danger); }
 .badge-muted { background: var(--surface-3); color: var(--muted); }
+
+/* ---------- Charts (dependency-free inline SVG) ---------- */
+.chart { width: 100%; height: auto; display: block; }
+.chart-grid { stroke: var(--border); stroke-width: 1; }
+.chart-axis-x, .chart-axis-y { font-size: 9px; fill: var(--muted); }
+.chart-axis-y { text-anchor: end; }
+.chart-bar-value { font-size: 10px; font-weight: 700; fill: var(--text); }
+.chart-pie-wrap { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; justify-content: center; padding: 6px 0; }
+.chart-legend { display: flex; flex-direction: column; gap: 6px; font-size: .82rem; }
+.chart-legend-item { display: flex; align-items: center; gap: 8px; }
+.chart-legend-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
 
 /* ---------- Queue / list rows ---------- */
 .list-row {

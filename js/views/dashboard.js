@@ -3,6 +3,7 @@ import { escapeHtml, fmtDate } from '../util.js';
 import { getSelectedCompanyId, isAllCompanies, getCompanyById } from '../state.js';
 import { printDashboardReport } from '../print.js';
 import { hasRole } from '../auth.js';
+import { lineChart, barChart, pieChart } from '../charts.js';
 
 const STATUS_PEGAWAI_LABEL = { karyawan_tetap: 'Karyawan Tetap', karyawan_kontrak: 'Karyawan Kontrak', mitra_kerja: 'Mitra Kerja', masyarakat: 'Masyarakat/Umum' };
 
@@ -23,6 +24,11 @@ export async function renderDashboard(root) {
       </select>
     </div>
     <div class="grid cols-4" id="statCards" style="margin-bottom:20px"></div>
+    <div class="panel"><h2>Tren Kunjungan per Bulan</h2><div id="chartKunjungan"></div></div>
+    <div class="grid cols-2">
+      <div class="panel"><h2>Top Five Disease (Grafik)</h2><div id="chartDiseases"></div></div>
+      <div class="panel"><h2>Kecelakaan Kerja per Tingkat</h2><div id="chartKk"></div></div>
+    </div>
     <div class="grid cols-2">
       <div class="panel"><h2>Antrian Hari Ini</h2><div id="queuePreview"></div></div>
       <div class="panel"><h2>Peringatan Apotek (Expired &amp; Safety Stock)</h2><div id="warnPreview"></div></div>
@@ -67,6 +73,15 @@ export async function renderDashboard(root) {
       <div class="card stat danger"><div class="label">Total Kecelakaan Kerja</div><div class="value">${totalKk}</div><div class="hint">${['FA','MA','LTI'].map(t => `${t}: ${kpis.kk.find(k => k.tingkat === t)?.jumlah || 0}`).join(' • ')}</div></div>
     `;
 
+    const bulanan = kpis.kunjunganBulanan || [];
+    root.querySelector('#chartKunjungan').innerHTML = bulanan.length
+      ? lineChart(bulanan.map(b => b.label), bulanan.map(b => b.total), { color: 'var(--primary)' })
+      : `<div class="empty">Belum ada data.</div>`;
+
+    root.querySelector('#chartKk').innerHTML = pieChart(
+      ['FA', 'MA', 'LTI'].map(t => ({ label: t, value: kpis.kk.find(k => k.tingkat === t)?.jumlah || 0 }))
+    );
+
     const queuePreview = root.querySelector('#queuePreview');
     queuePreview.innerHTML = queue.length ? queue.slice(0, 6).map(q => `
       <div class="list-row">
@@ -95,6 +110,9 @@ export async function renderDashboard(root) {
     const top5Diseases = Object.values(diseaseMap).sort((a, b) => b.jumlah - a.jumlah).slice(0, 5);
     const maxDisease = Math.max(1, ...top5Diseases.map(d => d.jumlah));
     root.querySelector('#topDiseases').innerHTML = top5Diseases.length ? top5Diseases.map((d, i) => rankBar(i, d.penyakit, d.kode, d.jumlah, maxDisease)).join('') : `<div class="empty">Belum ada data.</div>`;
+    root.querySelector('#chartDiseases').innerHTML = top5Diseases.length
+      ? barChart(top5Diseases.map(d => ({ label: d.kode, value: d.jumlah })))
+      : `<div class="empty">Belum ada data.</div>`;
 
     const drugMap = {};
     kpis.topDrugs.forEach(d => { drugMap[d.nama] = (drugMap[d.nama] || 0) + Number(d.jumlah); });

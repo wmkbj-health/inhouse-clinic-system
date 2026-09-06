@@ -180,7 +180,7 @@ export async function renderApotek(root) {
   root.querySelector('#btnRequest').addEventListener('click', () => openDrugRequestModal(drugs));
   root.querySelector('#btnSig').addEventListener('click', () => {
     const sel = getSelectedCompanyId();
-    openSignatureModal(sel === 'all' ? null : sel);
+    openSignatureModal(sel === 'all' ? null : sel, 'stocktake');
   });
   root.querySelector('#btnPrint').addEventListener('click', () => openStocktakePrintModal(drugs, filterMonth, filterYear));
 

@@ -1,12 +1,17 @@
 import * as api from '../api.js';
 import { escapeHtml, fmtDate, toast, openModal, mountPatientPicker, todayStr } from '../util.js';
 import { printSickNote } from '../print.js';
+import { openSignatureModal } from '../signatures.js';
+import { getSelectedCompanyId } from '../state.js';
 
 export async function renderSuratSakit(root) {
   root.innerHTML = `
     <div class="view-head">
       <div><h1>Surat Keterangan Sakit</h1><p class="desc">Penerbitan dan riwayat surat keterangan istirahat sakit pasien</p></div>
-      <button class="btn btn-primary" id="btnNew">+ Buat Surat</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline" id="btnSig">Atur Tanda Tangan</button>
+        <button class="btn btn-primary" id="btnNew">+ Buat Surat</button>
+      </div>
     </div>
     <div class="panel">
       <h2>Riwayat Surat <span class="muted" id="count"></span></h2>
@@ -42,6 +47,10 @@ export async function renderSuratSakit(root) {
   }
 
   root.querySelector('#btnNew').addEventListener('click', () => openSickNoteModal(() => renderSuratSakit(root)));
+  root.querySelector('#btnSig').addEventListener('click', () => {
+    const sel = getSelectedCompanyId();
+    openSignatureModal(sel === 'all' ? null : sel, 'sks');
+  });
 }
 
 function openPrintOptionsModal(note, patient, sig) {

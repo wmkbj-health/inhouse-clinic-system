@@ -1,12 +1,17 @@
 import * as api from '../api.js';
 import { escapeHtml, fmtDate, toast, openModal, mountPatientPicker, todayStr } from '../util.js';
 import { printReferral } from '../print.js';
+import { openSignatureModal } from '../signatures.js';
+import { getSelectedCompanyId } from '../state.js';
 
 export async function renderRujukan(root) {
   root.innerHTML = `
     <div class="view-head">
       <div><h1>Rujukan</h1><p class="desc">Surat rujukan pasien ke fasilitas kesehatan lain</p></div>
-      <button class="btn btn-primary" id="btnNew">+ Buat Rujukan</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline" id="btnSig">Atur Tanda Tangan</button>
+        <button class="btn btn-primary" id="btnNew">+ Buat Rujukan</button>
+      </div>
     </div>
     <div class="panel">
       <h2>Riwayat Rujukan <span class="muted" id="count"></span></h2>
@@ -41,6 +46,10 @@ export async function renderRujukan(root) {
   }
 
   root.querySelector('#btnNew').addEventListener('click', () => openReferralModal(() => renderRujukan(root)));
+  root.querySelector('#btnSig').addEventListener('click', () => {
+    const sel = getSelectedCompanyId();
+    openSignatureModal(sel === 'all' ? null : sel, 'rujukan');
+  });
 }
 
 async function openReferralModal(onDone) {

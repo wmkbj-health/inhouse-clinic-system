@@ -22,5 +22,14 @@ self.addEventListener('message', event => {
 
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
-  event.respondWith(fetch(event.request));
+  const url = new URL(event.request.url);
+  if (url.origin !== location.origin) return;
+  // GitHub Pages serves same-origin assets with a several-minute
+  // Cache-Control max-age. A plain fetch(event.request) still honors that
+  // HTTP cache, so for up to that window a "network-first" SW can still
+  // hand back a stale response without ever touching the network. Forcing
+  // cache: 'reload' bypasses the browser's HTTP cache for this request
+  // specifically (while still letting it store the fresh response), so a
+  // deploy is visible on the very next load, not several minutes later.
+  event.respondWith(fetch(event.request, { cache: 'reload' }).catch(() => fetch(event.request)));
 });

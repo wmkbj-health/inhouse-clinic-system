@@ -4,10 +4,57 @@ import { getCompanies, getCompanyById, getSelectedCompanyId, isAllCompanies, get
 import { printPatientCard, printMedicalConsentForm } from '../print.js';
 import { hasRole } from '../auth.js';
 import { VITAL_FIELDS, evaluateVitals, CHRONIC_DISEASE_OPTIONS } from '../clinical.js';
+import { openSignatureModal } from '../signatures.js';
 
 const STATUS_LABEL = { menunggu: 'Menunggu', diperiksa: 'Diperiksa', selesai: 'Selesai' };
 const STATUS_BADGE = { menunggu: 'badge-warn', diperiksa: 'badge-info', selesai: 'badge-ok' };
 const STATUS_PEGAWAI_LABEL = { karyawan_tetap: 'Karyawan Tetap', karyawan_kontrak: 'Karyawan Kontrak', mitra_kerja: 'Mitra Kerja', masyarakat: 'Masyarakat/Umum' };
+
+// Riwayat Penyakit: quick-pick checkboxes from CHRONIC_DISEASE_OPTIONS plus a
+// free-text "tambah manual" box for anything not on the list — both feed the
+// same riwayat_kronis text[] column, so no schema change is needed. Reused
+// on the new-patient form, the edit-patient form, and the SOAP exam form.
+function diseaseHistoryFieldHtml(selected = [], idPrefix) {
+  const manual = selected.filter(v => !CHRONIC_DISEASE_OPTIONS.includes(v));
+  return `
+    <div class="field full">
+      <label>Riwayat Penyakit (Kronis/Lainnya)</label>
+      <div class="checkline" style="flex-wrap:wrap" id="${idPrefix}Checks">
+        ${CHRONIC_DISEASE_OPTIONS.map(opt => `<label style="font-weight:400;font-size:.82rem"><input type="checkbox" value="${escapeHtml(opt)}" ${selected.includes(opt) ? 'checked' : ''}> ${escapeHtml(opt)}</label>`).join('')}
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <input type="text" id="${idPrefix}ManualInput" placeholder="Riwayat penyakit lain di luar daftar...">
+        <button type="button" class="btn btn-outline btn-sm" id="${idPrefix}ManualAdd" style="flex-shrink:0">+ Tambah</button>
+      </div>
+      <div class="icd-tags" id="${idPrefix}ManualTags" data-manual='${escapeHtml(JSON.stringify(manual))}'></div>
+    </div>`;
+}
+
+function bindDiseaseHistoryField(body, idPrefix) {
+  const tagsEl = body.querySelector(`#${idPrefix}ManualTags`);
+  let manual = JSON.parse(tagsEl.dataset.manual || '[]');
+  function drawTags() {
+    tagsEl.innerHTML = manual.map((v, i) => `<span class="icd-tag">${escapeHtml(v)} <button type="button" data-i="${i}">&times;</button></span>`).join('');
+    tagsEl.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { manual.splice(Number(b.dataset.i), 1); drawTags(); }));
+  }
+  drawTags();
+  const input = body.querySelector(`#${idPrefix}ManualInput`);
+  const addManual = () => {
+    const v = input.value.trim();
+    if (!v) return;
+    if (!manual.includes(v) && !CHRONIC_DISEASE_OPTIONS.includes(v)) manual.push(v);
+    input.value = '';
+    drawTags();
+  };
+  body.querySelector(`#${idPrefix}ManualAdd`).addEventListener('click', addManual);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addManual(); } });
+  return {
+    getValues: () => {
+      const checked = [...body.querySelectorAll(`#${idPrefix}Checks input:checked`)].map(c => c.value);
+      return [...checked, ...manual];
+    }
+  };
+}
 
 export async function renderPasien(root) {
   root.innerHTML = `
@@ -209,11 +256,7 @@ function openEditPatientModal(patient, onDone) {
           ${Object.entries(STATUS_PEGAWAI_LABEL).map(([v, l]) => `<option value="${v}" ${patient.status_pegawai === v ? 'selected' : ''}>${l}</option>`).join('')}
         </select>
       </div>
-      <div class="field full"><label>Riwayat Penyakit Kronis (butuh treatment berkala)</label>
-        <div class="checkline" style="flex-wrap:wrap">
-          ${CHRONIC_DISEASE_OPTIONS.map(opt => `<label style="font-weight:400;font-size:.82rem"><input type="checkbox" name="kronis" value="${escapeHtml(opt)}" ${(patient.riwayat_kronis || []).includes(opt) ? 'checked' : ''}> ${escapeHtml(opt)}</label>`).join('')}
-        </div>
-      </div>
+      ${diseaseHistoryFieldHtml(patient.riwayat_kronis || [], 'editPatRiwayat')}
       <div class="field full" style="display:flex;justify-content:flex-end;gap:8px">
         <button type="button" class="btn btn-outline" id="cancelBtn">Batal</button>
         <button type="submit" class="btn btn-primary">Simpan Perubahan</button>
@@ -221,6 +264,7 @@ function openEditPatientModal(patient, onDone) {
     </form>
   `, {
     onMount: (body, close) => {
+      const riwayatField = bindDiseaseHistoryField(body, 'editPatRiwayat');
       body.querySelector('#cancelBtn').addEventListener('click', close);
       body.querySelector('#editPatientForm').addEventListener('submit', async e => {
         e.preventDefault();
@@ -230,7 +274,7 @@ function openEditPatientModal(patient, onDone) {
             nama: fd.get('nama').trim(), nik: fd.get('nik').trim() || null, tgl_lahir: fd.get('tgl_lahir'),
             jenis_kelamin: fd.get('jenis_kelamin'), tempat_tinggal: fd.get('tempat_tinggal').trim(),
             no_hp: fd.get('no_hp').trim(), jabatan: fd.get('jabatan').trim(), departemen: fd.get('departemen').trim(),
-            status_pegawai: fd.get('status_pegawai'), riwayat_kronis: fd.getAll('kronis')
+            status_pegawai: fd.get('status_pegawai'), riwayat_kronis: riwayatField.getValues()
           });
           toast('Data pasien diperbarui');
           close();
@@ -282,6 +326,7 @@ function openNewPatientModal(onDone) {
         <div class="field"><label>Nama PT Mitra</label><input name="nama_pt_mitra"></div>
         <div class="field"><label>Lokasi Kerja / Asal</label><input name="lokasi_kerja"></div>
       </div>
+      ${diseaseHistoryFieldHtml([], 'newPatRiwayat')}
       <div class="field full"><label>Keluhan saat ini</label><input name="keluhan" placeholder="mis. Demam, batuk, luka tangan..."></div>
       <div class="field full" style="display:flex;justify-content:flex-end;gap:8px">
         <button type="button" class="btn btn-outline" id="cancelBtn">Batal</button>
@@ -290,6 +335,7 @@ function openNewPatientModal(onDone) {
     </form>
   `, {
     onMount: (body, close) => {
+      const riwayatField = bindDiseaseHistoryField(body, 'newPatRiwayat');
       body.querySelector('#cancelBtn').addEventListener('click', close);
       body.querySelector('[name=tgl_lahir]').addEventListener('input', e => {
         body.querySelector('#ageDisplay').value = e.target.value ? fmtAge(e.target.value) : '';
@@ -310,7 +356,7 @@ function openNewPatientModal(onDone) {
             status_pernikahan: fd.get('status_pernikahan'), tempat_tinggal: fd.get('tempat_tinggal').trim(),
             no_hp: fd.get('no_hp').trim(), jabatan: fd.get('jabatan').trim(), departemen: fd.get('departemen').trim(),
             status_pegawai: fd.get('status_pegawai'), nama_pt_mitra: fd.get('nama_pt_mitra')?.trim() || null,
-            lokasi_kerja: fd.get('lokasi_kerja')?.trim() || null
+            lokasi_kerja: fd.get('lokasi_kerja')?.trim() || null, riwayat_kronis: riwayatField.getValues()
           });
           const q = await api.addToQueue(companyId, patient, fd.get('keluhan').trim(), 'Poli Umum');
           const posisi = await api.queuePositionToday(companyId, q.id);
@@ -393,6 +439,8 @@ async function openSoapModal(queueItem, onDone) {
         <div class="field full"><label>S — Subjective (keluhan pasien)</label><textarea name="subjective">${escapeHtml(queueItem.keluhan || '')}</textarea></div>
       </div>
 
+      ${diseaseHistoryFieldHtml(patient.riwayat_kronis || [], 'soapRiwayat')}
+
       <div class="field full">
         <label>O — Objective: Tanda Vital</label>
         <div class="grid cols-4" id="vitalsGrid">
@@ -454,6 +502,7 @@ async function openSoapModal(queueItem, onDone) {
     </form>
   `, {
     onMount: (body, close) => {
+      const riwayatField = bindDiseaseHistoryField(body, 'soapRiwayat');
       body.querySelector('#cancelBtn').addEventListener('click', close);
 
       const vitalsAlert = body.querySelector('#vitalsAlert');
@@ -590,6 +639,12 @@ async function openSoapModal(queueItem, onDone) {
           const visit = await api.createVisit(visitPayload, obatSelected.map(o => ({ drugId: o.drugId, qty: o.qty })));
           await api.updateQueueStatus(queueItem.id, 'selesai');
 
+          const riwayatBaru = riwayatField.getValues();
+          const riwayatLama = patient.riwayat_kronis || [];
+          if (riwayatBaru.length !== riwayatLama.length || riwayatBaru.some(v => !riwayatLama.includes(v))) {
+            await api.updatePatient(patient.id, { riwayat_kronis: riwayatBaru });
+          }
+
           if (body.querySelector('#sksCheckbox').checked) {
             const nomorSurat = await api.nextNomorSurat(patient.company_id, 'SKS');
             await api.createSickNote({
@@ -612,6 +667,9 @@ async function openSoapModal(queueItem, onDone) {
 
 function openConsentModal(patient) {
   openModal('Form Persetujuan / Penolakan Tindakan Medis', `
+    <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+      <button type="button" class="btn btn-outline btn-sm" id="btnSigConsent">Atur Tanda Tangan</button>
+    </div>
     <form id="consentForm">
       <div class="field" style="margin-bottom:12px"><label>Jenis *</label>
         <select name="tipe"><option value="persetujuan">Persetujuan (Informed Consent)</option><option value="penolakan">Penolakan Tindakan</option></select>
@@ -629,6 +687,7 @@ function openConsentModal(patient) {
     </form>
   `, {
     onMount: (body, close) => {
+      body.querySelector('#btnSigConsent').addEventListener('click', () => openSignatureModal(patient.company_id, 'consent'));
       body.querySelector('#cancelBtn').addEventListener('click', close);
       body.querySelector('#consentForm').addEventListener('submit', async e => {
         e.preventDefault();
