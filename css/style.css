@@ -162,6 +162,7 @@ button, input, select, textarea { font-family: inherit; font-size: .95rem; color
   top: 0;
   height: 100vh;
   overflow-y: auto;
+  overflow-x: hidden;
   box-shadow: 2px 0 24px rgba(0,0,0,.18);
 }
 .main { margin-left: 250px; }
@@ -417,12 +418,12 @@ tbody tr:last-child td { border-bottom: none; }
 .cs-all-ic { width: 26px; text-align: center; color: var(--primary); }
 
 .global-search { position: relative; margin-bottom: 14px; }
-.global-search input {
-  width: 100%; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.25); color: #fff;
+.sidebar .global-search input[type="text"] {
+  width: 100%; background: rgba(255,255,255,.12) !important; border: 1px solid rgba(255,255,255,.25); color: #fff !important;
   border-radius: 9px; padding: 9px 12px; font-size: .82rem;
 }
-.global-search input::placeholder { color: rgba(255,255,255,.65); }
-.global-search input:focus { outline: 2px solid rgba(255,255,255,.5); outline-offset: -1px; }
+.sidebar .global-search input[type="text"]::placeholder { color: rgba(255,255,255,.65); }
+.sidebar .global-search input[type="text"]:focus { outline: 2px solid rgba(255,255,255,.5); outline-offset: -1px; }
 .global-search-results {
   position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 70;
   background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
