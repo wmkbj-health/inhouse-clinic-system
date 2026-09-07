@@ -653,6 +653,32 @@ export async function dashboardYearData(year, statusPegawai = 'all') {
   };
 }
 
+// Per-PT comparison for the year, ignoring the currently-selected company
+// filter (RLS still limits results to whatever companies this profile can
+// see — a single-PT user just gets one row back). Used by the "Perbandingan
+// Antar PT" dashboard panel, shown only when "Semua PT" is selected.
+export async function dashboardCompanyComparison(year) {
+  const from = `${year}-01-01`, to = `${year}-12-31`;
+  const [visits, sks, rujukan] = await Promise.all([
+    unwrap(await supabase.from('visits').select('company_id, jenis_kunjungan, kecelakaan_kerja').gte('tanggal', from).lte('tanggal', to)),
+    unwrap(await supabase.from('sick_notes').select('company_id').gte('tanggal', from).lte('tanggal', to)),
+    unwrap(await supabase.from('referrals').select('company_id').gte('tanggal', from).lte('tanggal', to))
+  ]);
+  const byCompany = {};
+  const ensure = id => byCompany[id] || (byCompany[id] = { kunjungan: 0, sks: 0, rujukan: 0, kk: 0, kkLti: 0 });
+  for (const v of visits) {
+    const row = ensure(v.company_id);
+    row.kunjungan++;
+    if (v.jenis_kunjungan === 'kecelakaan_kerja') {
+      row.kk++;
+      if (v.kecelakaan_kerja?.tingkat === 'LTI') row.kkLti++;
+    }
+  }
+  for (const s of sks) ensure(s.company_id).sks++;
+  for (const r of rujukan) ensure(r.company_id).rujukan++;
+  return byCompany;
+}
+
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 
 function emptyMonthBuckets(year) {

@@ -11,6 +11,7 @@ import { loadReferenceData, stockAlerts, dataCompletenessIssues, searchPatientsG
 import { getCompanies, getSelectedCompanyId, setSelectedCompanyId, sortByCompanyOrder, companyLogoUrl, setPendingApotekFilter, setPendingPatientOpen, fmtAge } from './state.js';
 import { startRealtimeSync, stopRealtimeSync } from './realtime.js';
 import { escapeHtml, openModal, debounce } from './util.js';
+import { notifyBrowser } from './browserNotify.js';
 
 const ROUTES = {
   dashboard: { label: 'Dashboard', icon: '&#9632;', render: renderDashboard, roles: ['dokter', 'perawat', 'viewer'] },
@@ -180,6 +181,7 @@ function mountGlobalSearch(container) {
 }
 
 let lastCompletenessIssues = null;
+let lastCompletenessCount = null;
 
 async function refreshNotifications() {
   const dots = document.querySelectorAll('.notif-dot');
@@ -191,6 +193,10 @@ async function refreshNotifications() {
       dot.hidden = !n;
       if (n) dot.textContent = n > 99 ? '99+' : String(n);
     });
+    if (lastCompletenessCount !== null && n > lastCompletenessCount) {
+      notifyBrowser('Data pasien/obat kurang lengkap', `${n} data perlu dilengkapi.`);
+    }
+    lastCompletenessCount = n;
   } catch (err) {
     dots.forEach(dot => { dot.hidden = true; });
   }
@@ -215,6 +221,8 @@ function openNotificationPanel() {
   openModal('Notifikasi Data Kurang Lengkap', body);
 }
 
+let lastAlertSig = null;
+
 async function renderAlertBanner() {
   const el = document.getElementById('alertBanner');
   if (!el || !hasRole('dokter', 'perawat')) { if (el) el.innerHTML = ''; return; }
@@ -227,6 +235,10 @@ async function renderAlertBanner() {
     // pops the banner back up rather than hiding it silently.
     const sigOf = list => list.map(d => d.id).sort().join(',');
     const sig = `${getSelectedCompanyId()}|${sigOf(alerts.expired)}|${sigOf(alerts.expiringSoon)}|${sigOf(alerts.reorder)}`;
+    if (lastAlertSig !== null && sig !== lastAlertSig) {
+      notifyBrowser('Peringatan Apotek', `${alerts.expired.length} kadaluarsa, ${alerts.expiringSoon.length} akan kadaluarsa, ${alerts.reorder.length} perlu pesan ulang.`);
+    }
+    lastAlertSig = sig;
     let dismissed = [];
     try { dismissed = JSON.parse(sessionStorage.getItem('ics_dismissed_alerts') || '[]'); } catch (e) { /* ignore */ }
     if (dismissed.includes(sig)) { el.innerHTML = ''; return; }
@@ -263,6 +275,7 @@ function renderCompanyBadge() {
   if (!el) return;
   const sel = getSelectedCompanyId();
   const company = getCompanies().find(c => c.id === sel);
+  if (company) { try { localStorage.setItem('ics_last_company_code', company.code); } catch (e) { /* ignore */ } }
   el.innerHTML = company
     ? `<div class="company-badge"><img src="${companyLogoUrl(company)}" alt="${escapeHtml(company.name)}" onerror="this.style.display='none'"><div><div class="cb-name">${escapeHtml(company.name)}</div><div class="cb-code">${escapeHtml(company.code)}</div></div></div>`
     : '';

@@ -55,9 +55,28 @@ body {
 #app-root { flex: 1; width: 100%; min-width: 0; }
 
 .login-screen {
-  width: 100%; min-height: 100vh; display: flex; align-items: center; justify-content: center;
-  padding: 24px; position: relative; overflow: hidden;
+  width: 100%; min-height: 100vh; display: flex; overflow: hidden;
+}
+.login-visual {
+  flex: 1.15; min-width: 0; display: flex; align-items: flex-end; justify-content: center;
+  padding: 48px 32px; position: relative; overflow: hidden;
   background: linear-gradient(180deg, #dff2e6 0%, #a9d9c4 22%, #5fae86 42%, #2f7a5c 62%, #164d3c 82%, #0c3329 100%);
+}
+.login-visual-copy {
+  position: relative; z-index: 1; color: #fff; max-width: 420px; margin-bottom: 6%;
+  text-shadow: 0 2px 10px rgba(0,0,0,.35);
+}
+.login-visual-copy h2 { font-size: 1.5rem; font-weight: 800; margin-bottom: 10px; letter-spacing: -.01em; }
+.login-visual-copy p { font-size: .92rem; line-height: 1.5; opacity: .95; }
+.login-panel {
+  flex: 1; min-width: 340px; max-width: 560px; display: flex; align-items: center; justify-content: center;
+  padding: 24px; background: var(--surface); overflow-y: auto;
+}
+@media (max-width: 900px) {
+  .login-screen { flex-direction: column; }
+  .login-visual { flex: 0 0 auto; min-height: 220px; padding: 24px; align-items: center; }
+  .login-visual-copy { display: none; }
+  .login-panel { max-width: none; flex: 1; }
 }
 /* Glowing sunrise, gently pulsing and drifting for a living-sky feel */
 .login-bg-sun {
@@ -135,7 +154,16 @@ body {
 .login-companies { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border); }
 .login-companies-label { text-align: center; font-size: .68rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 10px; }
 .login-companies-row { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; }
-.login-companies-row img { height: 22px; width: auto; max-width: 46px; object-fit: contain; opacity: .92; }
+.login-companies-row img { height: 22px; width: auto; max-width: 46px; object-fit: contain; opacity: .92; border-radius: 4px; transition: box-shadow .15s, opacity .15s; }
+.login-companies-row img.last-used { opacity: 1; box-shadow: 0 0 0 2px var(--primary); }
+.login-footer {
+  margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  font-size: .7rem; color: var(--muted);
+}
+.login-conn-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.login-conn-dot.online { background: var(--accent); }
+.login-conn-dot.offline { background: var(--danger); }
 @media (max-width: 480px) {
   .login-card { padding: 26px 20px 20px; }
   .login-companies-row img { height: 18px; max-width: 38px; }
@@ -471,3 +499,13 @@ tbody tr:last-child td { border-bottom: none; }
   border-radius: 999px; padding: 10px 10px 10px 18px; font-size: .85rem; z-index: 250;
   animation: fadein .25s ease;
 }
+
+.patient-summary-strip {
+  display: flex; flex-wrap: wrap; gap: 16px; background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px 16px; margin-bottom: 16px;
+}
+.ps-item { display: flex; flex-direction: column; gap: 2px; min-width: 110px; }
+.ps-item.ps-wide { flex: 1; min-width: 220px; }
+.ps-label { font-size: .68rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.ps-value { font-size: .88rem; font-weight: 700; }
+.ps-wide .ps-value { font-weight: 500; font-size: .82rem; }

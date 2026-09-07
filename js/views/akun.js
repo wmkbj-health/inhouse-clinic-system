@@ -2,6 +2,7 @@ import { listProfiles, updateProfile, createUserAccount, listActivityLog, export
 import { getCompanies } from '../state.js';
 import { escapeHtml, toast, openModal, confirmDialog, fmtDateTime } from '../util.js';
 import { ROLE_LABEL, getProfile } from '../auth.js';
+import { isBrowserNotifSupported, isBrowserNotifEnabled, enableBrowserNotif, disableBrowserNotif } from '../browserNotify.js';
 
 export async function renderAkun(root) {
   root.innerHTML = `
@@ -22,6 +23,11 @@ export async function renderAkun(root) {
         <thead><tr><th>Waktu</th><th>Pengguna</th><th>Aksi</th><th>Entitas</th><th>Detail</th></tr></thead>
         <tbody id="logRows"></tbody>
       </table></div>
+    </div>
+    <div class="panel">
+      <h2>Notifikasi Browser</h2>
+      <p class="desc" style="margin-bottom:12px">Tampilkan notifikasi desktop saat ada peringatan stok obat baru atau data pasien/obat yang kurang lengkap — hanya aktif selagi aplikasi ini terbuka di browser (tab boleh di-minimize/background, tapi tidak saat browser ditutup). Ini bukan pesan WhatsApp/SMS; untuk itu diperlukan layanan tambahan di luar aplikasi ini.</p>
+      <button class="btn btn-outline" id="btnToggleNotif"></button>
     </div>
     <div class="panel">
       <h2>Backup Data</h2>
@@ -65,6 +71,25 @@ export async function renderAkun(root) {
     </tr>`).join('') || `<tr><td colspan="5" class="empty">Belum ada log aktivitas.</td></tr>`;
 
   root.querySelector('#btnNewUser').addEventListener('click', () => openNewUserModal(companies, () => renderAkun(root)));
+
+  const notifBtn = root.querySelector('#btnToggleNotif');
+  function paintNotifBtn() {
+    if (!isBrowserNotifSupported()) { notifBtn.textContent = 'Tidak didukung browser ini'; notifBtn.disabled = true; return; }
+    const on = isBrowserNotifEnabled();
+    notifBtn.textContent = on ? 'Nonaktifkan Notifikasi Browser' : 'Aktifkan Notifikasi Browser';
+    notifBtn.classList.toggle('btn-danger', on);
+    notifBtn.classList.toggle('btn-outline', !on);
+  }
+  paintNotifBtn();
+  notifBtn.addEventListener('click', async () => {
+    try {
+      if (isBrowserNotifEnabled()) { disableBrowserNotif(); toast('Notifikasi browser dinonaktifkan'); }
+      else { await enableBrowserNotif(); toast('Notifikasi browser diaktifkan'); }
+    } catch (err) {
+      toast(err.message || 'Gagal mengubah pengaturan notifikasi', 'err');
+    }
+    paintNotifBtn();
+  });
 
   root.querySelector('#btnBackup').addEventListener('click', async e => {
     const btn = e.target;

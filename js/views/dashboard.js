@@ -1,6 +1,6 @@
 import * as api from '../api.js';
 import { escapeHtml, fmtDate } from '../util.js';
-import { getSelectedCompanyId, isAllCompanies, getCompanyById } from '../state.js';
+import { getSelectedCompanyId, isAllCompanies, getCompanyById, getCompanies } from '../state.js';
 import { printDashboardReport } from '../print.js';
 import { hasRole } from '../auth.js';
 import { lineChart, barChart, pieChart } from '../charts.js';
@@ -16,7 +16,10 @@ export async function renderDashboard(root) {
   root.innerHTML = `
     <div class="view-head">
       <div><h1>Dashboard</h1><p class="desc">Ringkasan operasional klinik</p></div>
-      <button class="btn btn-outline" id="btnPrint">Cetak Laporan</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-outline" id="btnExportExcel">Export Excel</button>
+        <button class="btn btn-outline" id="btnPrint">Cetak Laporan</button>
+      </div>
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px">
       <select id="yearFilter"></select>
@@ -44,6 +47,7 @@ export async function renderDashboard(root) {
       <div class="panel"><h2>Top 10 Medicine</h2><div id="topDrugs"></div></div>
     </div>
     <div class="panel"><h2>Top Five Disease per Departemen</h2><div class="table-wrap" id="topDeptDiseases"></div></div>
+    ${isAllCompanies() ? `<div class="panel"><h2>Perbandingan Antar PT</h2><p class="desc" style="margin-bottom:10px">Total per PT untuk tahun terpilih (hanya PT yang bisa diakses akun ini).</p><div class="table-wrap" id="companyComparison"></div></div>` : ''}
     ${canSeeAttention ? `<div class="panel"><h2>Perlu Perhatian <span class="muted" id="attentionCount"></span></h2><p class="desc" style="margin-bottom:10px">Pasien dengan tanda vital abnormal, riwayat penyakit kronis, kasus LTI, observasi/rawat inap terbaru, atau masih dalam masa istirahat.</p><div id="attention"></div></div>` : ''}
   `;
 
@@ -146,6 +150,25 @@ export async function renderDashboard(root) {
     });
     root.querySelector('#topDeptDiseases').innerHTML = deptRows.length ? `<table><thead><tr><th>Departemen</th><th>Top Five Disease</th></tr></thead><tbody>${deptRows.join('')}</tbody></table>` : `<div class="empty">Belum ada data.</div>`;
 
+    if (isAllCompanies()) {
+      const cmpEl = root.querySelector('#companyComparison');
+      try {
+        const cmp = await api.dashboardCompanyComparison(year);
+        const companies = getCompanies();
+        const rows = companies
+          .filter(c => cmp[c.id])
+          .map(c => ({ c, r: cmp[c.id] }))
+          .sort((a, b) => b.r.kunjungan - a.r.kunjungan);
+        cmpEl.innerHTML = rows.length ? `<table>
+          <thead><tr><th>PT</th><th>Kunjungan</th><th>Surat Sakit</th><th>Rujukan</th><th>Kecelakaan Kerja</th><th>— LTI</th></tr></thead>
+          <tbody>${rows.map(({ c, r }) => `<tr>
+            <td>${escapeHtml(c.name)}</td><td>${r.kunjungan}</td><td>${r.sks}</td><td>${r.rujukan}</td><td>${r.kk}</td><td>${r.kkLti}</td>
+          </tr>`).join('')}</tbody></table>` : `<div class="empty">Belum ada data.</div>`;
+      } catch (err) {
+        cmpEl.innerHTML = `<div class="empty">Gagal memuat perbandingan antar PT.</div>`;
+      }
+    }
+
     if (canSeeAttention) {
       const attentionEl = root.querySelector('#attention');
       root.querySelector('#attentionCount').textContent = `(${attention.length})`;
@@ -174,6 +197,33 @@ export async function renderDashboard(root) {
   statusSel.addEventListener('change', load);
 
   await load();
+
+  root.querySelector('#btnExportExcel').addEventListener('click', () => {
+    if (!window.XLSX) { alert('Gagal memuat pustaka Excel. Periksa koneksi internet lalu coba lagi.'); return; }
+    const company = isAllCompanies() ? 'Semua PT' : (getCompanyById(getSelectedCompanyId())?.name || '-');
+    const diseaseMap = {};
+    lastKpis.topDiseases.forEach(d => { diseaseMap[d.kode] = diseaseMap[d.kode] || { kode: d.kode, penyakit: d.penyakit, jumlah: 0 }; diseaseMap[d.kode].jumlah += d.jumlah; });
+    const topDiseases = Object.values(diseaseMap).sort((a, b) => b.jumlah - a.jumlah);
+    const drugMap = {};
+    lastKpis.topDrugs.forEach(d => { drugMap[d.nama] = (drugMap[d.nama] || 0) + Number(d.jumlah); });
+    const topDrugs = Object.entries(drugMap).sort((a, b) => b[1] - a[1]).map(([nama, jumlah]) => ({ Obat: nama, Jumlah: jumlah }));
+
+    const wb = XLSX.utils.book_new();
+    const summary = [
+      { Metrik: 'PT', Nilai: company },
+      { Metrik: 'Tahun', Nilai: lastYearLabel },
+      { Metrik: 'Total Kunjungan', Nilai: lastKpis.kunjungan.reduce((s, r) => s + r.total_kunjungan, 0) },
+      { Metrik: 'Total Surat Sakit', Nilai: lastKpis.sks.reduce((s, r) => s + r.total_sks, 0) },
+      { Metrik: 'Total Rujukan Keluar', Nilai: lastKpis.rujukan.reduce((s, r) => s + r.total_rujukan, 0) },
+      { Metrik: 'Total Kecelakaan Kerja', Nilai: lastKpis.kk.reduce((s, r) => s + r.jumlah, 0) }
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), 'Ringkasan');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet((lastKpis.kunjunganBulanan || []).map(b => ({ Bulan: b.label, Total: b.total }))), 'Kunjungan Bulanan');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(topDiseases.map(d => ({ Kode: d.kode, Penyakit: d.penyakit, Jumlah: d.jumlah }))), 'Top Disease');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(topDrugs), 'Top Obat');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet((lastKpis.kk || []).map(k => ({ Tingkat: k.tingkat, Jumlah: k.jumlah }))), 'Kecelakaan Kerja');
+    XLSX.writeFile(wb, `laporan-klinik-${lastYearLabel}-${company.replace(/[^\w]+/g, '_')}.xlsx`);
+  });
 
   root.querySelector('#btnPrint').addEventListener('click', () => {
     const company = isAllCompanies() ? null : getCompanyById(getSelectedCompanyId());

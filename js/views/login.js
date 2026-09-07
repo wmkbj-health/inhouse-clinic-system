@@ -1,6 +1,8 @@
 import { signIn } from '../auth.js';
 import { toast } from '../util.js';
 
+const APP_VERSION = 'v1.0';
+
 const COMPANY_LOGOS = [
   { code: 'WSL', name: 'PT Wana Subur Lestari' },
   { code: 'MTI', name: 'PT Mayangkara Tanaman Industri' },
@@ -48,37 +50,68 @@ function acaciaForestSvg() {
 }
 
 export function renderLogin(root, onSuccess) {
+  // Purely cosmetic (no auth implication) — app.js persists the code of
+  // whichever PT was last shown in the sidebar, so a returning user sees
+  // their usual PT's logo highlighted even before signing in.
+  let lastCompanyCode = null;
+  try { lastCompanyCode = localStorage.getItem('ics_last_company_code'); } catch (e) { /* ignore */ }
+
   root.innerHTML = `
     <div class="login-screen">
-      <div class="login-bg-sun"></div>
-      <div class="login-bg-clouds">
-        <span class="cloud c1"></span><span class="cloud c2"></span><span class="cloud c3"></span>
-      </div>
-      <div class="login-bg-sparkle">
-        ${Array.from({ length: 14 }).map((_, i) => `<span class="spark s${i % 7}"></span>`).join('')}
-      </div>
-      ${acaciaForestSvg()}
-      <div class="login-card">
-        <div class="login-brand">
-          <img src="assets/app-icon.png" alt="Logo">
-          <h1>Inhouse Clinic System</h1>
-          <p>Klinik Digital Terpadu — Masuk untuk melanjutkan</p>
+      <div class="login-visual">
+        <div class="login-bg-sun"></div>
+        <div class="login-bg-clouds">
+          <span class="cloud c1"></span><span class="cloud c2"></span><span class="cloud c3"></span>
         </div>
-        <form id="loginForm">
-          <div class="field" style="margin-bottom:14px"><label>Email</label><input type="email" name="email" required autocomplete="username" placeholder="nama@klinik.com"></div>
-          <div class="field" style="margin-bottom:18px"><label>Kata Sandi</label><input type="password" name="password" required autocomplete="current-password" placeholder="••••••••"></div>
-          <button type="submit" class="btn btn-primary" style="width:100%">Masuk</button>
-        </form>
-        <p class="login-hint">Belum punya akun? Hubungi dokter/admin klinik Anda untuk dibuatkan akses.</p>
-        <div class="login-companies">
-          <div class="login-companies-label">Melayani kesehatan karyawan di</div>
-          <div class="login-companies-row">
-            ${COMPANY_LOGOS.map(c => `<img src="assets/logos/${c.code.toLowerCase()}.png" alt="${c.name}" title="${c.name}" onerror="this.style.display='none'">`).join('')}
+        <div class="login-bg-sparkle">
+          ${Array.from({ length: 14 }).map((_, i) => `<span class="spark s${i % 7}"></span>`).join('')}
+        </div>
+        ${acaciaForestSvg()}
+        <div class="login-visual-copy">
+          <h2>Klinik Digital Terpadu</h2>
+          <p>Satu sistem untuk pendaftaran pasien, rekam medis, apotek FEFO, surat sakit, dan rujukan — terhubung real-time di setiap unit klinik perusahaan.</p>
+        </div>
+      </div>
+      <div class="login-panel">
+        <div class="login-card">
+          <div class="login-brand">
+            <img src="assets/app-icon.png" alt="Logo">
+            <h1>Inhouse Clinic System</h1>
+            <p>Masuk untuk melanjutkan</p>
+          </div>
+          <form id="loginForm">
+            <div class="field" style="margin-bottom:14px"><label>Email</label><input type="email" name="email" required autocomplete="username" placeholder="nama@klinik.com"></div>
+            <div class="field" style="margin-bottom:18px"><label>Kata Sandi</label><input type="password" name="password" required autocomplete="current-password" placeholder="••••••••"></div>
+            <button type="submit" class="btn btn-primary" style="width:100%">Masuk</button>
+          </form>
+          <p class="login-hint">Belum punya akun? Hubungi dokter/admin klinik Anda untuk dibuatkan akses.</p>
+          <div class="login-companies">
+            <div class="login-companies-label">Melayani kesehatan karyawan di</div>
+            <div class="login-companies-row">
+              ${COMPANY_LOGOS.map(c => `<img class="${c.code === lastCompanyCode ? 'last-used' : ''}" src="assets/logos/${c.code.toLowerCase()}.png" alt="${c.name}" title="${c.name}" onerror="this.style.display='none'">`).join('')}
+            </div>
+          </div>
+          <div class="login-footer">
+            <span>${APP_VERSION}</span>
+            <span class="login-conn-dot" id="loginConnDot"></span>
+            <span id="loginConnLabel"></span>
           </div>
         </div>
       </div>
     </div>
   `;
+
+  const connDot = root.querySelector('#loginConnDot');
+  const connLabel = root.querySelector('#loginConnLabel');
+  function paintConn() {
+    connDot.classList.toggle('online', navigator.onLine);
+    connDot.classList.toggle('offline', !navigator.onLine);
+    connLabel.textContent = navigator.onLine ? 'Online' : 'Tidak ada koneksi internet';
+  }
+  paintConn();
+  window.addEventListener('online', paintConn);
+  window.addEventListener('offline', paintConn);
+
   root.querySelector('#loginForm').addEventListener('submit', async e => {
     e.preventDefault();
     const btn = e.target.querySelector('button[type=submit]');

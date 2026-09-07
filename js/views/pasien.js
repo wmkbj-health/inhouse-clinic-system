@@ -284,6 +284,7 @@ function openPatientDetailModal(patient, onChange) {
       <button class="btn btn-sm btn-outline" id="btnConsent">Persetujuan/Penolakan Medis</button>
       <button class="btn btn-sm btn-danger" id="btnHapusPasien">Arsipkan</button>
     </div>
+    <div class="patient-summary-strip" id="patientSummary">Memuat ringkasan riwayat medis...</div>
     <h2 style="font-size:.95rem;margin-bottom:8px">Riwayat Kunjungan</h2>
     <div class="table-wrap" id="visitHistory"><div class="empty">Memuat...</div></div>
   `, {
@@ -310,6 +311,19 @@ function openPatientDetailModal(patient, onChange) {
 
       async function drawHistory() {
         const visits = await api.getVisitsByPatient(patient.id);
+
+        const summaryEl = body.querySelector('#patientSummary');
+        const kronis = patient.riwayat_kronis || [];
+        const sorted = visits.slice().sort((a, b) => new Date(b.tanggal) - new Date(a.tanggal));
+        const lastVisit = sorted[0];
+        const kkCount = visits.filter(v => v.jenis_kunjungan === 'kecelakaan_kerja').length;
+        summaryEl.innerHTML = `
+          <div class="ps-item"><span class="ps-label">Total Kunjungan</span><span class="ps-value">${visits.length}</span></div>
+          <div class="ps-item"><span class="ps-label">Kunjungan Terakhir</span><span class="ps-value">${lastVisit ? fmtDate(lastVisit.tanggal) : '-'}</span></div>
+          <div class="ps-item"><span class="ps-label">Kecelakaan Kerja</span><span class="ps-value">${kkCount}</span></div>
+          <div class="ps-item ps-wide"><span class="ps-label">Riwayat Penyakit Kronis</span><span class="ps-value">${kronis.length ? kronis.map(escapeHtml).join(', ') : 'Tidak ada'}</span></div>
+        `;
+
         const histEl = body.querySelector('#visitHistory');
         histEl.innerHTML = visits.length ? `<table>
           <thead><tr><th>Tanggal</th><th>Jenis</th><th>Diagnosa</th><th>Disposisi</th><th>Biaya</th><th></th></tr></thead>
