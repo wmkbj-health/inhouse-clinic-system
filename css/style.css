@@ -427,6 +427,11 @@ tbody tr:last-child td { border-bottom: none; }
   border-radius: 20px; padding: 4px 12px; font-size: .78rem; font-weight: 700; cursor: pointer;
 }
 .alert-chip:hover { background: rgba(239,83,80,.28); }
+.alert-dismiss {
+  background: none; border: none; color: var(--danger); font-size: 1.2rem; line-height: 1;
+  cursor: pointer; padding: 2px 6px; margin-left: auto;
+}
+.alert-dismiss:hover { opacity: .7; }
 
 .toast-wrap { position: fixed; bottom: 18px; right: 18px; display: flex; flex-direction: column; gap: 8px; z-index: 200; }
 .toast { background: var(--surface-3); border: 1px solid var(--border); color: var(--text); padding: 10px 16px; border-radius: 10px; box-shadow: var(--shadow); font-size: .85rem; animation: fadein .2s; }

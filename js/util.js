@@ -14,6 +14,16 @@ export function fmtDate(iso) {
   return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+// Unambiguous date+time for audit trails — 'short' month rules out any
+// D/M vs M/D confusion that a plain numeric format like 6/9/2026 invites.
+export function fmtDateTime(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  const date = d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+  const time = d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  return `${date}, ${time}`;
+}
+
 export function fmtCurrency(n) {
   return 'Rp ' + Math.round(n || 0).toLocaleString('id-ID');
 }

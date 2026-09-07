@@ -1,6 +1,6 @@
 import { listProfiles, updateProfile, createUserAccount, listActivityLog, exportSnapshot } from '../api.js';
 import { getCompanies } from '../state.js';
-import { escapeHtml, toast, openModal, confirmDialog } from '../util.js';
+import { escapeHtml, toast, openModal, confirmDialog, fmtDateTime } from '../util.js';
 import { ROLE_LABEL, getProfile } from '../auth.js';
 
 export async function renderAkun(root) {
@@ -57,7 +57,7 @@ export async function renderAkun(root) {
   const logRows = root.querySelector('#logRows');
   logRows.innerHTML = logs.map(l => `
     <tr>
-      <td>${new Date(l.created_at).toLocaleString('id-ID')}</td>
+      <td>${fmtDateTime(l.created_at)}</td>
       <td>${escapeHtml(l.profiles?.full_name || '-')}</td>
       <td>${escapeHtml(l.action)}</td>
       <td>${escapeHtml(l.entity)}</td>

@@ -548,7 +548,7 @@ async function openSoapModal(queueItem, onDone) {
             <div class="field"><label>Penyebab / Terkena</label><input name="terkena" placeholder="mis. Benturan mesin, chainsaw, dll"></div>
             <div class="field"><label>Lokasi Kejadian</label><input name="lokasiKejadian"></div>
           </div>
-          <div class="field full"><label>Kronologi Kejadian</label><textarea name="kronologi"></textarea></div>
+          <div class="field full"><label>Kronologi Kejadian *</label><textarea name="kronologi" id="kronologiKK" required minlength="20" placeholder="Jelaskan urutan kejadian secara ringkas namun jelas: apa yang sedang dikerjakan, apa yang terjadi, dan bagaimana cedera terjadi."></textarea></div>
           <div class="field full"><label>Tindakan</label><textarea name="tindakan"></textarea></div>
         </div>
       </div>
@@ -898,7 +898,7 @@ export function openEditVisitModal(visit, onDone) {
             <div class="field"><label>Penyebab / Terkena</label><input name="terkena" value="${escapeHtml(visit.kecelakaan_kerja?.terkena || '')}"></div>
             <div class="field"><label>Lokasi Kejadian</label><input name="lokasiKejadian" value="${escapeHtml(visit.kecelakaan_kerja?.lokasiKejadian || '')}"></div>
           </div>
-          <div class="field full"><label>Kronologi Kejadian</label><textarea name="kronologi">${escapeHtml(visit.kecelakaan_kerja?.kronologi || '')}</textarea></div>
+          <div class="field full"><label>Kronologi Kejadian *</label><textarea name="kronologi" required minlength="20" placeholder="Jelaskan urutan kejadian secara ringkas namun jelas: apa yang sedang dikerjakan, apa yang terjadi, dan bagaimana cedera terjadi.">${escapeHtml(visit.kecelakaan_kerja?.kronologi || '')}</textarea></div>
           <div class="field full"><label>Tindakan</label><textarea name="tindakan">${escapeHtml(visit.kecelakaan_kerja?.tindakan || '')}</textarea></div>
         </div>
       </div>

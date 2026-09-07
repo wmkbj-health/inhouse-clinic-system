@@ -159,6 +159,16 @@ async function renderAlertBanner() {
   try {
     const alerts = await stockAlerts();
     if (!alerts.total) { el.innerHTML = ''; return; }
+    // Keyed by exactly which items are flagged (not just the counts), so a
+    // banner someone dismissed this session stays dismissed only as long as
+    // the underlying alert set is unchanged — any new/different item still
+    // pops the banner back up rather than hiding it silently.
+    const sigOf = list => list.map(d => d.id).sort().join(',');
+    const sig = `${getSelectedCompanyId()}|${sigOf(alerts.expired)}|${sigOf(alerts.expiringSoon)}|${sigOf(alerts.reorder)}`;
+    let dismissed = [];
+    try { dismissed = JSON.parse(sessionStorage.getItem('ics_dismissed_alerts') || '[]'); } catch (e) { /* ignore */ }
+    if (dismissed.includes(sig)) { el.innerHTML = ''; return; }
+
     const chip = (n, label, type) => n ? `<button type="button" class="alert-chip" data-warn="${type}">${n} ${escapeHtml(label)}</button>` : '';
     el.innerHTML = `
       <div class="alert-banner">
@@ -166,12 +176,21 @@ async function renderAlertBanner() {
         ${chip(alerts.expired.length, 'sudah kadaluarsa', 'expired')}
         ${chip(alerts.expiringSoon.length, 'akan kadaluarsa ≤30 hari', 'expiring')}
         ${chip(alerts.reorder.length, 'perlu pesan ulang', 'minimum')}
+        <button type="button" class="alert-dismiss" id="alertDismiss" title="Sembunyikan untuk sesi ini">&times;</button>
       </div>`;
     el.querySelectorAll('[data-warn]').forEach(btn => btn.addEventListener('click', () => {
       setPendingApotekFilter(btn.dataset.warn);
       location.hash = '#apotek';
       route();
     }));
+    el.querySelector('#alertDismiss').addEventListener('click', () => {
+      try {
+        const list = JSON.parse(sessionStorage.getItem('ics_dismissed_alerts') || '[]');
+        list.push(sig);
+        sessionStorage.setItem('ics_dismissed_alerts', JSON.stringify(list.slice(-20)));
+      } catch (e) { /* ignore */ }
+      el.innerHTML = '';
+    });
   } catch (err) {
     el.innerHTML = '';
   }
