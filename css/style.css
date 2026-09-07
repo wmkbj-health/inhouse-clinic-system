@@ -416,6 +416,30 @@ tbody tr:last-child td { border-bottom: none; }
 .cs-item img { width: 26px; height: 26px; object-fit: contain; }
 .cs-all-ic { width: 26px; text-align: center; color: var(--primary); }
 
+.global-search { position: relative; margin-bottom: 14px; }
+.global-search input {
+  width: 100%; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.25); color: #fff;
+  border-radius: 9px; padding: 9px 12px; font-size: .82rem;
+}
+.global-search input::placeholder { color: rgba(255,255,255,.65); }
+.global-search input:focus { outline: 2px solid rgba(255,255,255,.5); outline-offset: -1px; }
+.global-search-results {
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 70;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: var(--shadow); overflow: hidden; max-height: 320px; overflow-y: auto;
+}
+.gs-item { display: block; width: 100%; text-align: left; background: none; border: none; border-bottom: 1px solid var(--border); padding: 9px 12px; cursor: pointer; }
+.gs-item:last-child { border-bottom: none; }
+.gs-item:hover { background: var(--surface-2); }
+.gs-name { font-size: .85rem; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 6px; }
+.gs-meta { font-size: .74rem; color: var(--muted); margin-top: 2px; }
+.gs-empty { padding: 12px; font-size: .82rem; color: var(--muted); text-align: center; }
+
+.conn-status-offline {
+  background: #f5a623; color: #1a1200; padding: 8px 20px; font-size: .85rem; font-weight: 600;
+  text-align: center;
+}
+
 .alert-banner {
   display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
   background: rgba(239,83,80,.12); border-bottom: 1px solid var(--danger);

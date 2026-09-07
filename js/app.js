@@ -7,10 +7,10 @@ import { renderSuratSakit } from './views/suratsakit.js';
 import { renderAkun } from './views/akun.js';
 import { renderLogin } from './views/login.js';
 import { initAuth, isLoggedIn, getProfile, hasRole, signOut, ROLE_LABEL } from './auth.js';
-import { loadReferenceData, stockAlerts, dataCompletenessIssues } from './api.js';
-import { getCompanies, getSelectedCompanyId, setSelectedCompanyId, sortByCompanyOrder, companyLogoUrl, setPendingApotekFilter } from './state.js';
+import { loadReferenceData, stockAlerts, dataCompletenessIssues, searchPatientsGlobal } from './api.js';
+import { getCompanies, getSelectedCompanyId, setSelectedCompanyId, sortByCompanyOrder, companyLogoUrl, setPendingApotekFilter, setPendingPatientOpen, fmtAge } from './state.js';
 import { startRealtimeSync, stopRealtimeSync } from './realtime.js';
-import { escapeHtml, openModal } from './util.js';
+import { escapeHtml, openModal, debounce } from './util.js';
 
 const ROUTES = {
   dashboard: { label: 'Dashboard', icon: '&#9632;', render: renderDashboard, roles: ['dokter', 'perawat', 'viewer'] },
@@ -56,6 +56,10 @@ function renderShell() {
           <label style="color:rgba(255,255,255,.8)">Perusahaan</label>
           <div class="company-switcher" id="companySwitcher"></div>
         </div>
+        <div class="global-search" id="globalSearch">
+          <input type="text" id="globalSearchInput" placeholder="Cari pasien (nama/No. RM/NIK)...">
+          <div class="global-search-results" id="globalSearchResults" hidden></div>
+        </div>
         <nav class="nav" id="nav"></nav>
         <div class="sidebar-foot">
           Masuk sebagai <b>${profile.full_name}</b> (${ROLE_LABEL[profile.role]})<br>
@@ -63,6 +67,7 @@ function renderShell() {
         </div>
       </aside>
       <div class="main">
+        <div id="connStatus" hidden></div>
         <div id="alertBanner"></div>
         <div class="view" id="view-root"></div>
       </div>
@@ -85,6 +90,12 @@ function renderShell() {
   buildNav();
   document.getElementById('logoutBtn').addEventListener('click', async () => { stopRealtimeSync(); await signOut(); boot(); });
 
+  // Patient-level search — never exposed to "viewer" (dashboard-only,
+  // no per-patient data, per the role model everywhere else in this app).
+  const searchEl = document.getElementById('globalSearch');
+  if (hasRole('dokter', 'perawat')) mountGlobalSearch(searchEl);
+  else searchEl.hidden = true;
+
   if (hasRole('dokter', 'perawat')) {
     document.querySelectorAll('.notif-btn').forEach(btn => {
       btn.hidden = false;
@@ -99,8 +110,11 @@ function renderShell() {
     // stale login), compounding into real sluggishness on a shared device
     // that gets logged in/out repeatedly through the day.
     window.addEventListener('hashchange', route);
+    window.addEventListener('online', renderConnStatus);
+    window.addEventListener('offline', renderConnStatus);
     shellListenersBound = true;
   }
+  renderConnStatus();
   route();
   renderAlertBanner();
   refreshNotifications();
@@ -115,6 +129,54 @@ function renderShell() {
       refreshNotifications();
     });
   }
+}
+
+// navigator.onLine only reflects "has a network interface", not "Supabase is
+// reachable" — but this is a purely online (no offline write queue) app, so
+// the one thing that actually matters to warn about is exactly what onLine
+// tells us: don't trust the form you're filling in to save right now.
+function renderConnStatus() {
+  const el = document.getElementById('connStatus');
+  if (!el) return;
+  if (navigator.onLine) { el.hidden = true; el.innerHTML = ''; return; }
+  el.hidden = false;
+  el.innerHTML = `<div class="conn-status-offline">&#9888; Tidak ada koneksi internet — perubahan yang Anda buat sekarang <b>tidak akan tersimpan</b> sampai koneksi kembali.</div>`;
+}
+
+function mountGlobalSearch(container) {
+  const input = container.querySelector('#globalSearchInput');
+  const results = container.querySelector('#globalSearchResults');
+
+  function renderResults(list) {
+    if (!list.length) { results.innerHTML = `<div class="gs-empty">Tidak ditemukan</div>`; results.hidden = false; return; }
+    results.innerHTML = list.map(p => `
+      <button type="button" class="gs-item" data-id="${p.id}">
+        <div class="gs-name">${escapeHtml(p.nama)} <span class="badge badge-muted">${escapeHtml(p.no_rm)}</span></div>
+        <div class="gs-meta">${fmtAge(p.tgl_lahir)} • ${escapeHtml(p.departemen || '-')} • ${escapeHtml(p.companies?.code || '-')}</div>
+      </button>`).join('');
+    results.hidden = false;
+    results.querySelectorAll('[data-id]').forEach(btn => btn.addEventListener('click', () => {
+      setPendingPatientOpen(btn.dataset.id);
+      results.hidden = true;
+      input.value = '';
+      if (location.hash === '#pasien') route();
+      else location.hash = '#pasien';
+    }));
+  }
+
+  const doSearch = debounce(async () => {
+    const q = input.value.trim();
+    if (q.length < 2) { results.hidden = true; results.innerHTML = ''; return; }
+    try {
+      renderResults(await searchPatientsGlobal(q));
+    } catch (err) {
+      results.hidden = true;
+    }
+  }, 300);
+
+  input.addEventListener('input', doSearch);
+  input.addEventListener('focus', () => { if (input.value.trim().length >= 2) doSearch(); });
+  document.addEventListener('click', e => { if (!container.contains(e.target)) results.hidden = true; });
 }
 
 let lastCompletenessIssues = null;

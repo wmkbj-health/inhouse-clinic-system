@@ -143,22 +143,6 @@ export async function deletePatient(id) {
   logActivity(null, 'archive_patient', 'patients', id, {});
 }
 
-// True permanent delete — only ever offered from the "diarsipkan" view, on a
-// patient that's already been archived, as a deliberate second step for
-// genuine data-entry mistakes (a same-day duplicate registration, a typo'd
-// name) rather than the default action. Still blocked by the same FK
-// constraints as before on any patient with real clinical history (visits,
-// queue, referrals, sick_notes, consent_forms all reference patients(id)),
-// so this can't be used to erase an actual medical record.
-export async function hardDeletePatient(id) {
-  const { error } = await supabase.from('patients').delete().eq('id', id);
-  if (error) {
-    if (error.code === '23503') throw new Error('Pasien ini tidak dapat dihapus permanen karena sudah memiliki riwayat kunjungan/antrian/rujukan/persetujuan medis. Data medis tidak boleh dihapus demi keamanan rekam medis — biarkan tetap diarsipkan.');
-    throw error;
-  }
-  logActivity(null, 'hard_delete_patient', 'patients', id, {});
-}
-
 export async function queuePositionToday(companyId, queueId) {
   const list = await unwrap(await supabase.from('queue').select('id').eq('company_id', companyId).eq('tanggal', todayStr()).order('created_at'));
   const idx = list.findIndex(q => q.id === queueId);
@@ -329,18 +313,6 @@ export async function updateDrug(id, payload) {
 // by mistake — archiving just hides it from the active Apotek list.
 export async function deleteDrug(id) {
   await unwrap(await supabase.from('drugs').update({ deleted_at: new Date().toISOString() }).eq('id', id).select().single());
-}
-
-// True permanent delete — only offered from the "diarsipkan" view, for a
-// drug entered by mistake (wrong name/duplicate SKU) rather than the default
-// action. Still blocked by FK constraints if any batch/transaction/resep
-// already references it.
-export async function hardDeleteDrug(id) {
-  const { error } = await supabase.from('drugs').delete().eq('id', id);
-  if (error) {
-    if (error.code === '23503') throw new Error('Item ini tidak dapat dihapus permanen karena sudah memiliki riwayat batch/transaksi/resep. Biarkan tetap diarsipkan.');
-    throw error;
-  }
 }
 
 export async function listArchivedDrugs() {

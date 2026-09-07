@@ -40,6 +40,12 @@ let pendingApotekFilter = null;
 export function setPendingApotekFilter(type) { pendingApotekFilter = type; }
 export function consumePendingApotekFilter() { const v = pendingApotekFilter; pendingApotekFilter = null; return v; }
 
+// Set by the global search box (any page) so #pasien can jump straight to a
+// patient's detail modal after the hash navigation actually lands there.
+let pendingPatientOpen = null;
+export function setPendingPatientOpen(id) { pendingPatientOpen = id; }
+export function consumePendingPatientOpen() { const v = pendingPatientOpen; pendingPatientOpen = null; return v; }
+
 export function calcAge(tglLahir) {
   if (!tglLahir) return null;
   const dob = new Date(tglLahir + 'T00:00:00');
