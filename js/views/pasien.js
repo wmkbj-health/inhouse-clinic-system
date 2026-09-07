@@ -202,7 +202,8 @@ async function renderPatientListTab(container) {
         <td>${escapeHtml(p.companies?.code || '-')}</td>
         <td style="display:flex;gap:6px">
           ${p.deleted_at
-            ? `<button class="btn btn-sm btn-outline" data-restore="${p.id}">Pulihkan</button>`
+            ? `<button class="btn btn-sm btn-outline" data-restore="${p.id}">Pulihkan</button>
+               <button class="btn btn-sm btn-danger" data-hapus-permanen="${p.id}">Hapus Permanen</button>`
             : `<button class="btn btn-sm btn-outline" data-daftar="${p.id}">Antrian</button>
                <button class="btn btn-sm btn-danger" data-hapus="${p.id}">Arsipkan</button>`}
         </td>
@@ -241,6 +242,18 @@ async function renderPatientListTab(container) {
         draw(container.querySelector('#patSearch').value.trim());
       } catch (err) {
         toast(err.message || 'Gagal memulihkan pasien', 'err');
+      }
+    }));
+    rows.querySelectorAll('[data-hapus-permanen]').forEach(btn => btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const p = currentList.find(x => x.id === btn.dataset.hapusPermanen);
+      if (!confirmDialog(`Hapus PERMANEN data pasien "${p.nama}" (No. RM ${p.no_rm})? Tindakan ini tidak bisa dibatalkan. Gunakan ini hanya untuk data hasil kesalahan input (mis. duplikat pendaftaran), bukan pasien yang sudah pernah diperiksa.`)) return;
+      try {
+        await api.hardDeletePatient(p.id);
+        toast('Data pasien dihapus permanen');
+        draw(container.querySelector('#patSearch').value.trim());
+      } catch (err) {
+        toast(err.message || 'Gagal menghapus pasien', 'err');
       }
     }));
   }

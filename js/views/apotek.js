@@ -180,7 +180,8 @@ export async function renderApotek(root) {
           <td>${d.deleted_at ? '' : `<span class="badge ${st.cls}">${st.label}</span>`}</td>
           <td style="display:flex;gap:4px">
             ${d.deleted_at
-              ? `<button class="btn btn-sm btn-outline" data-restore="${d.id}">Pulihkan</button>`
+              ? `<button class="btn btn-sm btn-outline" data-restore="${d.id}">Pulihkan</button>
+                 <button class="btn btn-sm btn-danger" data-hapus-permanen="${d.id}">Hapus Permanen</button>`
               : `<button class="btn btn-sm btn-outline" data-batch="${d.id}">Batch</button>
                  <button class="btn btn-sm btn-outline" data-edit="${d.id}">Edit</button>
                  <button class="btn btn-sm btn-danger" data-hapus="${d.id}">Arsipkan</button>`}
@@ -213,6 +214,17 @@ export async function renderApotek(root) {
         loadAndDraw();
       } catch (err) {
         toast(err.message || 'Gagal memulihkan item', 'err');
+      }
+    }));
+    rows.querySelectorAll('[data-hapus-permanen]').forEach(btn => btn.addEventListener('click', async () => {
+      const d = drugs.find(x => x.id === btn.dataset.hapusPermanen);
+      if (!confirmDialog(`Hapus PERMANEN item "${d.nama}"? Tindakan ini tidak bisa dibatalkan. Gunakan ini hanya untuk data hasil kesalahan input, bukan item yang sudah pernah ada transaksi/resep.`)) return;
+      try {
+        await api.hardDeleteDrug(d.id);
+        toast('Item dihapus permanen');
+        loadAndDraw();
+      } catch (err) {
+        toast(err.message || 'Gagal menghapus item', 'err');
       }
     }));
   }
