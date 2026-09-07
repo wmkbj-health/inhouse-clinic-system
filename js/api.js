@@ -51,11 +51,49 @@ export async function nextRmNumber(companyId) {
   return `RM-${year}-${String((count || 0) + 1).padStart(5, '0')}`;
 }
 
+// Backs the global search box in the sidebar — same nama/no_rm/nik match as
+// listPatients, just capped small since it's a live-typing dropdown, not a
+// browsable list.
+export async function searchPatientsGlobal(query) {
+  if (!query || query.trim().length < 2) return [];
+  let q = supabase.from('patients').select('id, nama, no_rm, nik, tgl_lahir, departemen, company_id, companies(code, name)')
+    .is('deleted_at', null)
+    .or(`nama.ilike.%${query}%,no_rm.ilike.%${query}%,nik.ilike.%${query}%`)
+    .limit(8);
+  q = companyFilter(q);
+  return unwrap(await q);
+}
+
 export async function listPatients(search) {
-  let q = supabase.from('patients').select('*, companies(code, name)').order('created_at', { ascending: false });
+  let q = supabase.from('patients').select('*, companies(code, name)').order('created_at', { ascending: false }).is('deleted_at', null);
   q = companyFilter(q);
   if (search) q = q.or(`nama.ilike.%${search}%,no_rm.ilike.%${search}%,nik.ilike.%${search}%`);
   return unwrap(await q);
+}
+
+// Paginated variant for the "Daftar Pasien" table — separate from
+// listPatients() (which several other views use to fetch the full active
+// list for an inline patient picker, where pagination doesn't apply).
+export async function listPatientsPage(search, { includeArchived = false, page = 0, pageSize = 25 } = {}) {
+  let q = supabase.from('patients').select('*, companies(code, name)', { count: 'exact' }).order('created_at', { ascending: false });
+  q = companyFilter(q);
+  if (!includeArchived) q = q.is('deleted_at', null);
+  if (search) q = q.or(`nama.ilike.%${search}%,no_rm.ilike.%${search}%,nik.ilike.%${search}%`);
+  q = q.range(page * pageSize, page * pageSize + pageSize - 1);
+  const { data, error, count } = await q;
+  if (error) throw error;
+  return { rows: data, total: count || 0 };
+}
+
+export async function listArchivedPatients() {
+  let q = supabase.from('patients').select('*, companies(code, name)').not('deleted_at', 'is', null).order('deleted_at', { ascending: false });
+  q = companyFilter(q);
+  return unwrap(await q);
+}
+
+export async function restorePatient(id) {
+  await unwrap(await supabase.from('patients').update({ deleted_at: null }).eq('id', id).select().single());
+  logActivity(null, 'restore_patient', 'patients', id, {});
 }
 
 export async function createPatient(payload) {
@@ -95,13 +133,30 @@ export async function updatePatient(id, payload) {
   return row;
 }
 
+// Soft-delete (arsip): patients are never hard-deleted from the app so a
+// medical record is never permanently lost by accident. Archived patients
+// disappear from the active list/search but stay in the database (and can
+// be restored) — separate from the pre-existing FK protection that already
+// blocks deleting a patient with real clinical history.
 export async function deletePatient(id) {
+  await unwrap(await supabase.from('patients').update({ deleted_at: new Date().toISOString() }).eq('id', id).select().single());
+  logActivity(null, 'archive_patient', 'patients', id, {});
+}
+
+// True permanent delete — only ever offered from the "diarsipkan" view, on a
+// patient that's already been archived, as a deliberate second step for
+// genuine data-entry mistakes (a same-day duplicate registration, a typo'd
+// name) rather than the default action. Still blocked by the same FK
+// constraints as before on any patient with real clinical history (visits,
+// queue, referrals, sick_notes, consent_forms all reference patients(id)),
+// so this can't be used to erase an actual medical record.
+export async function hardDeletePatient(id) {
   const { error } = await supabase.from('patients').delete().eq('id', id);
   if (error) {
-    if (error.code === '23503') throw new Error('Pasien ini tidak dapat dihapus karena sudah memiliki riwayat kunjungan/antrian/rujukan. Data medis tidak boleh dihapus demi keamanan rekam medis.');
+    if (error.code === '23503') throw new Error('Pasien ini tidak dapat dihapus permanen karena sudah memiliki riwayat kunjungan/antrian/rujukan/persetujuan medis. Data medis tidak boleh dihapus demi keamanan rekam medis — biarkan tetap diarsipkan.');
     throw error;
   }
-  logActivity(null, 'delete_patient', 'patients', id, {});
+  logActivity(null, 'hard_delete_patient', 'patients', id, {});
 }
 
 export async function queuePositionToday(companyId, queueId) {
@@ -155,8 +210,10 @@ export async function stockAlerts() {
 }
 
 // ---------------- Drugs / FEFO ----------------
-export async function listDrugsWithStock() {
-  const drugs = unwrap(await supabase.from('drugs').select('*, drug_categories(name)').order('nama'));
+export async function listDrugsWithStock({ includeArchived = false } = {}) {
+  let drugQ = supabase.from('drugs').select('*, drug_categories(name)').order('nama');
+  if (!includeArchived) drugQ = drugQ.is('deleted_at', null);
+  const drugs = unwrap(await drugQ);
   const sel = getSelectedCompanyId();
   let batchQ = supabase.from('drug_batches').select('*').gt('qty_sisa', 0).order('tanggal_expired', { ascending: true, nullsFirst: false });
   if (sel !== 'all') batchQ = batchQ.eq('company_id', sel);
@@ -266,12 +323,32 @@ export async function updateDrug(id, payload) {
   return unwrap(await supabase.from('drugs').update(payload).eq('id', id));
 }
 
+// Soft-delete (arsip): keeps the master-data row (nama_paten, kategori, kode,
+// ...) intact so historical stocktake/resep reports referencing this drug
+// still resolve its name correctly, and the item can be restored if archived
+// by mistake — archiving just hides it from the active Apotek list.
 export async function deleteDrug(id) {
+  await unwrap(await supabase.from('drugs').update({ deleted_at: new Date().toISOString() }).eq('id', id).select().single());
+}
+
+// True permanent delete — only offered from the "diarsipkan" view, for a
+// drug entered by mistake (wrong name/duplicate SKU) rather than the default
+// action. Still blocked by FK constraints if any batch/transaction/resep
+// already references it.
+export async function hardDeleteDrug(id) {
   const { error } = await supabase.from('drugs').delete().eq('id', id);
   if (error) {
-    if (error.code === '23503') throw new Error('Item ini tidak dapat dihapus karena sudah memiliki riwayat batch/transaksi/resep. Nonaktifkan dengan mengosongkan stok, atau ganti namanya.');
+    if (error.code === '23503') throw new Error('Item ini tidak dapat dihapus permanen karena sudah memiliki riwayat batch/transaksi/resep. Biarkan tetap diarsipkan.');
     throw error;
   }
+}
+
+export async function listArchivedDrugs() {
+  return unwrap(await supabase.from('drugs').select('*, drug_categories(name)').not('deleted_at', 'is', null).order('nama'));
+}
+
+export async function restoreDrug(id) {
+  await unwrap(await supabase.from('drugs').update({ deleted_at: null }).eq('id', id).select().single());
 }
 
 export async function receiveBatch(companyId, drugId, payload) {

@@ -74,6 +74,9 @@ export async function renderApotek(root) {
           <option value="expiring">Akan Kadaluarsa (30 hari)</option>
           <option value="expired">Sudah Kadaluarsa</option>
         </select>
+        <label style="display:flex;align-items:center;gap:6px;font-size:.82rem;color:var(--muted);cursor:pointer">
+          <input type="checkbox" id="drugShowArchived"> Tampilkan yang diarsipkan
+        </label>
       </div>
       <div class="table-wrap"><table>
         <thead><tr>
@@ -100,12 +103,18 @@ export async function renderApotek(root) {
     const periodTo = isCurrentMonth ? todayStr() : periodToDate.toISOString().slice(0, 10);
     const daysElapsed = isCurrentMonth ? now.getDate() : periodToDate.getDate();
 
-    const [baseDrugs, stats] = await Promise.all([api.listDrugsWithStock(), api.drugPeriodStats(periodFrom, periodTo)]);
+    const showArchived = root.querySelector('#drugShowArchived')?.checked;
+    const [baseDrugs, stats, archived] = await Promise.all([
+      api.listDrugsWithStock(),
+      api.drugPeriodStats(periodFrom, periodTo),
+      showArchived ? api.listArchivedDrugs() : Promise.resolve([])
+    ]);
     drugs = baseDrugs.map(d => {
       const st = stats[d.id] || { penerimaan: 0, pemakaian: 0 };
       const stokAwal = isCurrentMonth ? Math.max(0, d.stok - st.penerimaan + st.pemakaian) : null;
       return { ...d, penerimaan: st.penerimaan, pemakaian: st.pemakaian, rataRata: st.pemakaian / daysElapsed, stokAwal };
     });
+    drugs = drugs.concat(archived.map(d => ({ ...d, batches: [], stok: 0, nextExpiry: null, hargaJual: 0, penerimaan: 0, pemakaian: 0, rataRata: 0, stokAwal: 0 })));
     drawAll();
   }
 
@@ -128,16 +137,17 @@ export async function renderApotek(root) {
   }
 
   function drawStats() {
-    const habis = drugs.filter(d => d.stok <= 0);
-    const minimum = drugs.filter(d => d.stok > 0 && d.stok <= d.stok_minimum);
-    const expiringOrExpired = drugs.filter(d => d.nextExpiry && daysUntil(d.nextExpiry) <= 30);
+    const active = drugs.filter(d => !d.deleted_at);
+    const habis = active.filter(d => d.stok <= 0);
+    const minimum = active.filter(d => d.stok > 0 && d.stok <= d.stok_minimum);
+    const expiringOrExpired = active.filter(d => d.nextExpiry && daysUntil(d.nextExpiry) <= 30);
     root.querySelector('#apotekStats').innerHTML = `
-      <div class="card stat primary"><div class="label">Total Item</div><div class="value">${drugs.length}</div></div>
+      <div class="card stat primary"><div class="label">Total Item</div><div class="value">${active.length}</div></div>
       <div class="card stat danger"><div class="label">Stok Habis</div><div class="value">${habis.length}</div><div class="hint">Tidak dapat dilayani, perlu penerimaan segera</div></div>
       <div class="card stat warn"><div class="label">Stok Kritis (Pesan Ulang)</div><div class="value">${minimum.length}</div><div class="hint">Stok ≤ batas minimum, belum habis</div></div>
       <div class="card stat danger"><div class="label">Kadaluarsa / Akan Kadaluarsa</div><div class="value">${expiringOrExpired.length}</div><div class="hint">Dalam 30 hari ke depan atau sudah lewat</div></div>
     `;
-    root.querySelector('#drugCount').textContent = `(${drugs.length})`;
+    root.querySelector('#drugCount').textContent = `(${active.length})`;
   }
 
   const rows = root.querySelector('#drugRows');
@@ -156,9 +166,9 @@ export async function renderApotek(root) {
       const items = byCategory[cat].sort((a, b) => a.nama.localeCompare(b.nama, 'id'));
       return `<tr class="drug-cat-row"><td colspan="12"><b>${escapeHtml(cat.toUpperCase())}</b></td></tr>` + items.map(d => {
         const st = statusOf(d);
-        return `<tr>
+        return `<tr${d.deleted_at ? ' style="opacity:.55"' : ''}>
           <td>${escapeHtml(d.kode)}</td>
-          <td>${escapeHtml(d.nama)}${d.nama_paten ? `<div class="muted" style="font-size:.72rem">${escapeHtml(d.nama_paten)}</div>` : ''}</td>
+          <td>${escapeHtml(d.nama)}${d.nama_paten ? `<div class="muted" style="font-size:.72rem">${escapeHtml(d.nama_paten)}</div>` : ''}${d.deleted_at ? ' <span class="badge badge-muted">Diarsipkan</span>' : ''}</td>
           <td>${d.jenis}</td>
           <td>${d.stokAwal ?? '-'}</td>
           <td>${d.penerimaan}</td>
@@ -167,11 +177,14 @@ export async function renderApotek(root) {
           <td>${d.stok} ${escapeHtml(d.satuan)}</td>
           <td>${d.nextExpiry ? fmtDate(d.nextExpiry) : '-'}</td>
           <td>Rp ${Number(d.hargaJual || 0).toLocaleString('id-ID')}</td>
-          <td><span class="badge ${st.cls}">${st.label}</span></td>
+          <td>${d.deleted_at ? '' : `<span class="badge ${st.cls}">${st.label}</span>`}</td>
           <td style="display:flex;gap:4px">
-            <button class="btn btn-sm btn-outline" data-batch="${d.id}">Batch</button>
-            <button class="btn btn-sm btn-outline" data-edit="${d.id}">Edit</button>
-            <button class="btn btn-sm btn-danger" data-hapus="${d.id}">Hapus</button>
+            ${d.deleted_at
+              ? `<button class="btn btn-sm btn-outline" data-restore="${d.id}">Pulihkan</button>
+                 <button class="btn btn-sm btn-danger" data-hapus-permanen="${d.id}">Hapus Permanen</button>`
+              : `<button class="btn btn-sm btn-outline" data-batch="${d.id}">Batch</button>
+                 <button class="btn btn-sm btn-outline" data-edit="${d.id}">Edit</button>
+                 <button class="btn btn-sm btn-danger" data-hapus="${d.id}">Arsipkan</button>`}
           </td>
         </tr>`;
       }).join('');
@@ -184,10 +197,31 @@ export async function renderApotek(root) {
     }));
     rows.querySelectorAll('[data-hapus]').forEach(btn => btn.addEventListener('click', async () => {
       const d = drugs.find(x => x.id === btn.dataset.hapus);
-      if (!confirmDialog(`Hapus item "${d.nama}" dari master data?`)) return;
+      if (!confirmDialog(`Arsipkan item "${d.nama}"? Data tidak dihapus permanen — bisa dipulihkan lewat "Tampilkan yang diarsipkan".`)) return;
       try {
         await api.deleteDrug(d.id);
-        toast('Item dihapus');
+        toast('Item diarsipkan');
+        loadAndDraw();
+      } catch (err) {
+        toast(err.message || 'Gagal mengarsipkan item', 'err');
+      }
+    }));
+    rows.querySelectorAll('[data-restore]').forEach(btn => btn.addEventListener('click', async () => {
+      const d = drugs.find(x => x.id === btn.dataset.restore);
+      try {
+        await api.restoreDrug(d.id);
+        toast(`${d.nama} dipulihkan`);
+        loadAndDraw();
+      } catch (err) {
+        toast(err.message || 'Gagal memulihkan item', 'err');
+      }
+    }));
+    rows.querySelectorAll('[data-hapus-permanen]').forEach(btn => btn.addEventListener('click', async () => {
+      const d = drugs.find(x => x.id === btn.dataset.hapusPermanen);
+      if (!confirmDialog(`Hapus PERMANEN item "${d.nama}"? Tindakan ini tidak bisa dibatalkan. Gunakan ini hanya untuk data hasil kesalahan input, bukan item yang sudah pernah ada transaksi/resep.`)) return;
+      try {
+        await api.hardDeleteDrug(d.id);
+        toast('Item dihapus permanen');
         loadAndDraw();
       } catch (err) {
         toast(err.message || 'Gagal menghapus item', 'err');
@@ -202,7 +236,11 @@ export async function renderApotek(root) {
     drawRows(drugs.filter(d => {
       if (q && !(d.nama.toLowerCase().includes(q) || (d.kode || '').toLowerCase().includes(q) || (d.nama_paten || '').toLowerCase().includes(q))) return false;
       if (jenis && d.jenis !== jenis) return false;
-      if (warn && statusOf(d).key !== warn) return false;
+      // Archived items sit outside the "stok habis/kritis/kadaluarsa" status
+      // model (they're deliberately excluded from operational stock stats) —
+      // a status filter is operational, so it hides archived items entirely
+      // rather than matching them against a status that no longer applies.
+      if (warn) { if (d.deleted_at) return false; if (statusOf(d).key !== warn) return false; }
       return true;
     }));
   }
@@ -212,6 +250,7 @@ export async function renderApotek(root) {
   root.querySelector('#drugSearch').addEventListener('input', debounce(applyFilters, 200));
   root.querySelector('#drugFilter').addEventListener('change', applyFilters);
   root.querySelector('#drugWarnFilter').addEventListener('change', applyFilters);
+  root.querySelector('#drugShowArchived').addEventListener('change', loadAndDraw);
   monthSel.addEventListener('change', () => { filterMonth = Number(monthSel.value); loadAndDraw(); });
   yearSel.addEventListener('change', () => { filterYear = Number(yearSel.value); loadAndDraw(); });
 

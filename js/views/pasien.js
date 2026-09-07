@@ -1,6 +1,6 @@
 import * as api from '../api.js';
 import { el, escapeHtml, fmtDate, toast, openModal, debounce, confirmDialog, todayStr } from '../util.js';
-import { getCompanies, getCompanyById, getSelectedCompanyId, isAllCompanies, getDiseaseCodes, fmtAge } from '../state.js';
+import { getCompanies, getCompanyById, getSelectedCompanyId, isAllCompanies, getDiseaseCodes, fmtAge, consumePendingPatientOpen } from '../state.js';
 import { printPatientCard, printMedicalConsentForm, printResep } from '../print.js';
 import { hasRole } from '../auth.js';
 import { VITAL_FIELDS, evaluateVitals, CHRONIC_DISEASE_OPTIONS } from '../clinical.js';
@@ -103,7 +103,16 @@ export async function renderPasien(root) {
   listBtn.addEventListener('click', () => setActive('list'));
   root.querySelector('#btnNewPatient').addEventListener('click', () => openNewPatientModal(() => setActive('queue')));
 
-  setActive('queue');
+  // A result clicked in the sidebar's global search lands here (via
+  // #pasien navigation) with a patient id queued up to open directly,
+  // instead of making the user find it again in the list themselves.
+  const pendingOpenId = consumePendingPatientOpen();
+  if (pendingOpenId) {
+    setActive('list');
+    api.getPatient(pendingOpenId).then(p => openPatientDetailModal(p, () => renderPatientListTab(tabBody))).catch(() => {});
+  } else {
+    setActive('queue');
+  }
 }
 
 async function renderQueueTab(container) {
@@ -150,52 +159,98 @@ async function renderPatientListTab(container) {
   container.innerHTML = `
     <div class="panel">
       <h2>Daftar Pasien <span class="muted" id="patCount"></span></h2>
-      <div class="field" style="max-width:320px;margin-bottom:12px"><input type="text" id="patSearch" placeholder="Cari nama / No. RM / NIK..."></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+        <div class="field" style="max-width:320px;margin-bottom:0"><input type="text" id="patSearch" placeholder="Cari nama / No. RM / NIK..."></div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:.82rem;color:var(--muted);cursor:pointer">
+          <input type="checkbox" id="patShowArchived"> Tampilkan yang diarsipkan
+        </label>
+      </div>
       <div class="table-wrap"><table>
         <thead><tr><th>No. RM</th><th>Nama</th><th>Usia</th><th>JK</th><th>Departemen</th><th>Status Pegawai</th><th>PT</th><th></th></tr></thead>
         <tbody id="patRows"></tbody>
       </table></div>
+      <div style="display:flex;justify-content:center;align-items:center;gap:12px;margin-top:14px">
+        <button class="btn btn-sm btn-outline" id="patPrev">&larr; Sebelumnya</button>
+        <span class="muted" id="patPageInfo" style="font-size:.82rem"></span>
+        <button class="btn btn-sm btn-outline" id="patNext">Selanjutnya &rarr;</button>
+      </div>
     </div>`;
   const rows = container.querySelector('#patRows');
+  const PAGE_SIZE = 25;
+  let page = 0;
+  let currentList = [];
 
   async function draw(search) {
-    const list = await api.listPatients(search);
-    container.querySelector('#patCount').textContent = `(${list.length})`;
+    const showArchived = container.querySelector('#patShowArchived').checked;
+    const { rows: list, total } = await api.listPatientsPage(search, { includeArchived: showArchived, page, pageSize: PAGE_SIZE });
+    currentList = list;
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    container.querySelector('#patCount').textContent = `(${total})`;
+    container.querySelector('#patPageInfo').textContent = `Halaman ${page + 1} dari ${totalPages}`;
+    container.querySelector('#patPrev').disabled = page <= 0;
+    container.querySelector('#patNext').disabled = page >= totalPages - 1;
+
     if (!list.length) { rows.innerHTML = `<tr><td colspan="8" class="empty">Tidak ada pasien.</td></tr>`; return; }
     rows.innerHTML = list.map(p => `
-      <tr data-detail="${p.id}" style="cursor:pointer">
+      <tr data-detail="${p.id}" style="cursor:pointer${p.deleted_at ? ';opacity:.55' : ''}">
         <td>${escapeHtml(p.no_rm)}</td>
-        <td>${escapeHtml(p.nama)}</td>
+        <td>${escapeHtml(p.nama)}${p.deleted_at ? ' <span class="badge badge-muted">Diarsipkan</span>' : ''}</td>
         <td>${fmtAge(p.tgl_lahir)}</td>
         <td>${p.jenis_kelamin}</td>
         <td>${escapeHtml(p.departemen || '-')}</td>
         <td><span class="badge badge-info">${STATUS_PEGAWAI_LABEL[p.status_pegawai] || p.status_pegawai}</span></td>
         <td>${escapeHtml(p.companies?.code || '-')}</td>
         <td style="display:flex;gap:6px">
-          <button class="btn btn-sm btn-outline" data-daftar="${p.id}">Antrian</button>
-          <button class="btn btn-sm btn-danger" data-hapus="${p.id}">Hapus</button>
+          ${p.deleted_at
+            ? `<button class="btn btn-sm btn-outline" data-restore="${p.id}">Pulihkan</button>
+               <button class="btn btn-sm btn-danger" data-hapus-permanen="${p.id}">Hapus Permanen</button>`
+            : `<button class="btn btn-sm btn-outline" data-daftar="${p.id}">Antrian</button>
+               <button class="btn btn-sm btn-danger" data-hapus="${p.id}">Arsipkan</button>`}
         </td>
       </tr>`).join('');
 
     rows.querySelectorAll('tr[data-detail]').forEach(tr => tr.addEventListener('click', e => {
       if (e.target.closest('button')) return;
-      const p = list.find(x => x.id === tr.dataset.detail);
+      const p = currentList.find(x => x.id === tr.dataset.detail);
       openPatientDetailModal(p, () => draw(container.querySelector('#patSearch').value.trim()));
     }));
     rows.querySelectorAll('[data-daftar]').forEach(btn => btn.addEventListener('click', async e => {
       e.stopPropagation();
-      const p = list.find(x => x.id === btn.dataset.daftar);
+      const p = currentList.find(x => x.id === btn.dataset.daftar);
       const q = await api.addToQueue(p.company_id, p, '', p.status_pegawai === 'mitra_kerja' ? 'Poli Kecelakaan Kerja / Umum' : 'Poli Umum');
       const posisi = await api.queuePositionToday(p.company_id, q.id);
       toast(`${p.nama} masuk antrian — Nomor Antrian: ${posisi}`);
     }));
     rows.querySelectorAll('[data-hapus]').forEach(btn => btn.addEventListener('click', async e => {
       e.stopPropagation();
-      const p = list.find(x => x.id === btn.dataset.hapus);
-      if (!confirmDialog(`Hapus data pasien "${p.nama}" (No. RM ${p.no_rm})? Tindakan ini permanen dan tidak bisa dibatalkan.`)) return;
+      const p = currentList.find(x => x.id === btn.dataset.hapus);
+      if (!confirmDialog(`Arsipkan data pasien "${p.nama}" (No. RM ${p.no_rm})? Data tidak dihapus permanen — bisa dipulihkan kembali lewat "Tampilkan yang diarsipkan".`)) return;
       try {
         await api.deletePatient(p.id);
-        toast('Data pasien dihapus');
+        toast('Pasien diarsipkan');
+        draw(container.querySelector('#patSearch').value.trim());
+      } catch (err) {
+        toast(err.message || 'Gagal mengarsipkan pasien', 'err');
+      }
+    }));
+    rows.querySelectorAll('[data-restore]').forEach(btn => btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const p = currentList.find(x => x.id === btn.dataset.restore);
+      try {
+        await api.restorePatient(p.id);
+        toast(`${p.nama} dipulihkan`);
+        draw(container.querySelector('#patSearch').value.trim());
+      } catch (err) {
+        toast(err.message || 'Gagal memulihkan pasien', 'err');
+      }
+    }));
+    rows.querySelectorAll('[data-hapus-permanen]').forEach(btn => btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const p = currentList.find(x => x.id === btn.dataset.hapusPermanen);
+      if (!confirmDialog(`Hapus PERMANEN data pasien "${p.nama}" (No. RM ${p.no_rm})? Tindakan ini tidak bisa dibatalkan. Gunakan ini hanya untuk data hasil kesalahan input (mis. duplikat pendaftaran), bukan pasien yang sudah pernah diperiksa.`)) return;
+      try {
+        await api.hardDeletePatient(p.id);
+        toast('Data pasien dihapus permanen');
         draw(container.querySelector('#patSearch').value.trim());
       } catch (err) {
         toast(err.message || 'Gagal menghapus pasien', 'err');
@@ -204,7 +259,10 @@ async function renderPatientListTab(container) {
   }
   draw();
 
-  container.querySelector('#patSearch').addEventListener('input', debounce(e => draw(e.target.value.trim()), 250));
+  container.querySelector('#patSearch').addEventListener('input', debounce(e => { page = 0; draw(e.target.value.trim()); }, 250));
+  container.querySelector('#patShowArchived').addEventListener('change', () => { page = 0; draw(container.querySelector('#patSearch').value.trim()); });
+  container.querySelector('#patPrev').addEventListener('click', () => { if (page > 0) { page--; draw(container.querySelector('#patSearch').value.trim()); } });
+  container.querySelector('#patNext').addEventListener('click', () => { page++; draw(container.querySelector('#patSearch').value.trim()); });
 }
 
 function openPatientDetailModal(patient, onChange) {
@@ -224,7 +282,7 @@ function openPatientDetailModal(patient, onChange) {
       <button class="btn btn-sm btn-outline" id="btnCetakKartu">Cetak Kartu</button>
       <button class="btn btn-sm btn-outline" id="btnEditPasien">Edit</button>
       <button class="btn btn-sm btn-outline" id="btnConsent">Persetujuan/Penolakan Medis</button>
-      <button class="btn btn-sm btn-danger" id="btnHapusPasien">Hapus</button>
+      <button class="btn btn-sm btn-danger" id="btnHapusPasien">Arsipkan</button>
     </div>
     <h2 style="font-size:.95rem;margin-bottom:8px">Riwayat Kunjungan</h2>
     <div class="table-wrap" id="visitHistory"><div class="empty">Memuat...</div></div>
@@ -239,14 +297,14 @@ function openPatientDetailModal(patient, onChange) {
       body.querySelector('#btnEditPasien').addEventListener('click', () => { close(); openEditPatientModal(patient, onChange); });
       body.querySelector('#btnConsent').addEventListener('click', () => { close(); openConsentModal(patient); });
       body.querySelector('#btnHapusPasien').addEventListener('click', async () => {
-        if (!confirmDialog(`Hapus data pasien ${patient.nama}? Tindakan ini permanen.`)) return;
+        if (!confirmDialog(`Arsipkan data pasien ${patient.nama}? Data tidak dihapus permanen — bisa dipulihkan kembali dari Daftar Pasien.`)) return;
         try {
           await api.deletePatient(patient.id);
-          toast('Data pasien dihapus');
+          toast('Pasien diarsipkan');
           close();
           onChange();
         } catch (err) {
-          toast(err.message || 'Gagal menghapus pasien', 'err');
+          toast(err.message || 'Gagal mengarsipkan pasien', 'err');
         }
       });
 
