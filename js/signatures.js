@@ -1,5 +1,5 @@
 import * as api from './api.js';
-import { openModal, toast, escapeHtml } from './util.js';
+import { openModal, toast, escapeHtml, lockSubmit } from './util.js';
 
 export const DOC_TYPES = {
   rujukan: 'Surat Rujukan',
@@ -85,6 +85,7 @@ export async function openSignatureModal(companyId, docType = 'rujukan', onSaved
       body.querySelector('#cancelBtn').addEventListener('click', close);
       body.querySelector('#sigForm').addEventListener('submit', async e => {
         e.preventDefault();
+        const unlock = lockSubmit(e.target);
         collectCurrent();
         try {
           await api.savePrintSignatures(companyId, { signatures: byType });
@@ -93,6 +94,8 @@ export async function openSignatureModal(companyId, docType = 'rujukan', onSaved
           onSaved?.();
         } catch (err) {
           toast(err.message || 'Gagal menyimpan', 'err');
+        } finally {
+          unlock();
         }
       });
     }

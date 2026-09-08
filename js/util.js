@@ -106,3 +106,20 @@ export function debounce(fn, ms = 250) {
     timer = setTimeout(() => fn(...args), ms);
   };
 }
+
+// Disables a form's submit button and swaps its label for the duration of
+// an async save — without this, a slow save (several sequential Supabase
+// round trips, e.g. dispensing multiple drugs on a SOAP visit) looks like
+// the click "did nothing", and clicking again fires the handler a second
+// time on top of the first: a duplicate visit/patient/referral row, drug
+// stock deducted twice, etc. Call at the top of every submit handler and
+// unlock() in a finally block so the button recovers on error too.
+export function lockSubmit(form, label = 'Menyimpan...') {
+  const btn = form.querySelector('button[type="submit"]');
+  if (!btn) return () => {};
+  if (btn.disabled) return () => {}; // already locked — a stray second submit event, not a real click
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = label;
+  return () => { btn.disabled = false; btn.textContent = original; };
+}

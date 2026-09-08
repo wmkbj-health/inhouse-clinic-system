@@ -1,6 +1,6 @@
 import { listProfiles, updateProfile, createUserAccount, listActivityLog, exportSnapshot } from '../api.js';
 import { getCompanies } from '../state.js';
-import { escapeHtml, toast, openModal, confirmDialog, fmtDateTime } from '../util.js';
+import { escapeHtml, toast, openModal, confirmDialog, fmtDateTime, lockSubmit } from '../util.js';
 import { ROLE_LABEL, getProfile } from '../auth.js';
 import { isBrowserNotifSupported, isBrowserNotifEnabled, enableBrowserNotif, disableBrowserNotif } from '../browserNotify.js';
 
@@ -142,6 +142,7 @@ function openNewUserModal(companies, onDone) {
       body.querySelector('#cancelBtn').addEventListener('click', close);
       body.querySelector('#userForm').addEventListener('submit', async e => {
         e.preventDefault();
+        const unlock = lockSubmit(e.target);
         const fd = new FormData(e.target);
         const scope = Array.from(body.querySelector('[name=company_scope]').selectedOptions).map(o => o.value);
         try {
@@ -154,6 +155,8 @@ function openNewUserModal(companies, onDone) {
           onDone();
         } catch (err) {
           toast(err.message || 'Gagal membuat akun', 'err');
+        } finally {
+          unlock();
         }
       });
     }

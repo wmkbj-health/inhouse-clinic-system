@@ -1,5 +1,5 @@
 import * as api from '../api.js';
-import { escapeHtml, fmtDate, toast, openModal, mountPatientPicker, todayStr, confirmDialog } from '../util.js';
+import { escapeHtml, fmtDate, toast, openModal, mountPatientPicker, todayStr, confirmDialog, lockSubmit } from '../util.js';
 import { printReferral } from '../print.js';
 import { openSignatureModal } from '../signatures.js';
 import { getSelectedCompanyId } from '../state.js';
@@ -91,6 +91,7 @@ async function openReferralModal(onDone) {
       body.querySelector('#refForm').addEventListener('submit', async e => {
         e.preventDefault();
         if (!pickedPatient) { toast('Pilih pasien terlebih dahulu', 'err'); return; }
+        const unlock = lockSubmit(e.target);
         const fd = new FormData(e.target);
         try {
           await api.createReferral({
@@ -103,6 +104,8 @@ async function openReferralModal(onDone) {
           onDone();
         } catch (err) {
           toast(err.message || 'Gagal menyimpan rujukan', 'err');
+        } finally {
+          unlock();
         }
       });
     }

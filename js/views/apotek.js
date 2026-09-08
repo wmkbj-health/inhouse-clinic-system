@@ -1,5 +1,5 @@
 import * as api from '../api.js';
-import { escapeHtml, fmtDate, toast, openModal, debounce, todayStr, confirmDialog } from '../util.js';
+import { escapeHtml, fmtDate, toast, openModal, debounce, todayStr, confirmDialog, lockSubmit } from '../util.js';
 import { getDrugCategories, getSelectedCompanyId, isAllCompanies, getCompanyById, consumePendingApotekFilter } from '../state.js';
 import { printStocktake, printDrugRequest, printExpiryWriteoff, printRko } from '../print.js';
 import { openSignatureModal } from '../signatures.js';
@@ -356,6 +356,7 @@ function openAdjustModal(drug, batchId, onDone) {
       body.querySelector('#cancelBtn').addEventListener('click', close);
       body.querySelector('#adjForm').addEventListener('submit', async e => {
         e.preventDefault();
+        const unlock = lockSubmit(e.target);
         const fd = new FormData(e.target);
         try {
           await api.adjustStock(drug.batches.find(b => b.id === batchId).company_id, drug.id, batchId, Number(fd.get('qty')), fd.get('keterangan').trim());
@@ -364,6 +365,8 @@ function openAdjustModal(drug, batchId, onDone) {
           onDone();
         } catch (err) {
           toast(err.message || 'Gagal menyimpan koreksi', 'err');
+        } finally {
+          unlock();
         }
       });
     }
@@ -449,6 +452,7 @@ function openDrugModal(drug, onDone, drugs = []) {
           const dup = drugs.find(d => d.nama.trim().toLowerCase() === payload.nama.toLowerCase() && d.kategori_id === payload.kategori_id);
           if (dup && !confirmDialog(`"${dup.nama}" sudah ada di kategori ini (kode ${dup.kode}). Untuk menambah stok/batch baru dengan tanggal expired berbeda, gunakan "Penerimaan Obat" pada item yang sudah ada, bukan menambah item baru. Tetap buat item baru terpisah?`)) return;
         }
+        const unlock = lockSubmit(e.target);
         try {
           if (isEdit) {
             await api.updateDrug(drug.id, payload);
@@ -462,6 +466,8 @@ function openDrugModal(drug, onDone, drugs = []) {
           onDone();
         } catch (err) {
           toast(err.message || 'Gagal menyimpan: kode mungkin sudah dipakai', 'err');
+        } finally {
+          unlock();
         }
       });
     }
@@ -496,6 +502,7 @@ function openReceiveModal(drugs, onDone) {
       body.querySelector('#rxForm').addEventListener('submit', async e => {
         e.preventDefault();
         if (!companyId) return;
+        const unlock = lockSubmit(e.target);
         const fd = new FormData(e.target);
         try {
           await api.receiveBatch(companyId, fd.get('drugId'), {
@@ -509,6 +516,8 @@ function openReceiveModal(drugs, onDone) {
           onDone();
         } catch (err) {
           toast(err.message || 'Gagal menyimpan penerimaan', 'err');
+        } finally {
+          unlock();
         }
       });
     }
@@ -579,8 +588,13 @@ function openDrugRequestModal(drugs) {
         draw();
       });
       body.querySelector('#cancelBtn').addEventListener('click', close);
-      body.querySelector('#saveBtn').addEventListener('click', async () => {
+      body.querySelector('#saveBtn').addEventListener('click', async e => {
         if (!selected.length) { toast('Tambahkan minimal satu item', 'err'); return; }
+        const btn = e.currentTarget;
+        if (btn.disabled) return;
+        const original = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Menyimpan...';
         try {
           const nomor = await api.nextNomorPermintaan(companyId);
           const items = selected.map(s => ({ drug_id: s.drugId, nama: s.nama, satuan: s.satuan, stok_saat_ini: s.stok, jumlah_diminta: s.qty, keterangan: '' }));
@@ -597,6 +611,8 @@ function openDrugRequestModal(drugs) {
           printDrugRequest(row, items, getCompanyById(companyId), sig);
         } catch (err) {
           toast(err.message || 'Gagal menyimpan permintaan', 'err');
+          btn.disabled = false;
+          btn.textContent = original;
         }
       });
     }
@@ -709,7 +725,9 @@ function openExpiryWriteoffModal(drugs, onDone) {
         jenisSelect.addEventListener('change', drawRows);
 
         ewBody.querySelector('#ewCancel').addEventListener('click', close);
-        ewBody.querySelector('#ewSave').addEventListener('click', async () => {
+        ewBody.querySelector('#ewSave').addEventListener('click', async e => {
+          const btn = e.currentTarget;
+          if (btn.disabled) return;
           const lines = rowsEl.__lines || [];
           const trs = [...rowsEl.querySelectorAll('tr[data-i]')];
           const items = [];
@@ -723,6 +741,9 @@ function openExpiryWriteoffModal(drugs, onDone) {
             }
           });
           if (!items.length) { toast('Pilih minimal satu item untuk dimusnahkan', 'err'); return; }
+          const original = btn.textContent;
+          btn.disabled = true;
+          btn.textContent = 'Menyimpan...';
           try {
             const nomor = await api.nextNomorBeritaAcara(companyId);
             const payload = {
@@ -742,6 +763,8 @@ function openExpiryWriteoffModal(drugs, onDone) {
             printExpiryWriteoff({ ...payload, items }, company, sig);
           } catch (err) {
             toast(err.message || 'Gagal menyimpan Berita Acara', 'err');
+            btn.disabled = false;
+            btn.textContent = original;
           }
         });
       }

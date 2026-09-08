@@ -1,5 +1,5 @@
 import * as api from '../api.js';
-import { el, escapeHtml, fmtDate, toast, openModal, debounce, confirmDialog, todayStr } from '../util.js';
+import { el, escapeHtml, fmtDate, toast, openModal, debounce, confirmDialog, todayStr, lockSubmit } from '../util.js';
 import { getCompanies, getCompanyById, getSelectedCompanyId, isAllCompanies, getDiseaseCodes, fmtAge, consumePendingPatientOpen } from '../state.js';
 import { printPatientCard, printMedicalConsentForm, printResep } from '../print.js';
 import { hasRole } from '../auth.js';
@@ -388,6 +388,7 @@ function openEditPatientModal(patient, onDone) {
       });
       body.querySelector('#editPatientForm').addEventListener('submit', async e => {
         e.preventDefault();
+        const unlock = lockSubmit(e.target);
         const fd = new FormData(e.target);
         try {
           await api.updatePatient(patient.id, {
@@ -404,6 +405,8 @@ function openEditPatientModal(patient, onDone) {
           onDone();
         } catch (err) {
           toast(err.message || 'Gagal memperbarui data pasien', 'err');
+        } finally {
+          unlock();
         }
       });
     }
@@ -503,19 +506,27 @@ function openNewPatientModal(onDone) {
 
       body.querySelector('#newPatientForm').addEventListener('submit', async e => {
         e.preventDefault();
+        const unlock = lockSubmit(e.target, 'Memeriksa...');
         const fd = new FormData(e.target);
         const companyId = fd.get('company_id');
         const nama = fd.get('nama').trim();
         const nik = fd.get('nik').trim() || null;
-        const matches = await api.findPossibleDuplicatePatients(companyId, { nik, nama });
-        if (matches.length) {
-          openDuplicateMatchModal(matches, {
-            onUseExisting: existing => useExisting(existing, fd, companyId),
-            onRegisterNew: () => doRegister(fd, companyId)
-          });
-          return;
+        try {
+          const matches = await api.findPossibleDuplicatePatients(companyId, { nik, nama });
+          if (matches.length) {
+            // Hands off to the duplicate-match modal's own buttons from here —
+            // unlock so the form behind it isn't left stuck if the user just
+            // cancels back out of that modal instead of picking an option.
+            openDuplicateMatchModal(matches, {
+              onUseExisting: existing => useExisting(existing, fd, companyId),
+              onRegisterNew: () => doRegister(fd, companyId)
+            });
+            return;
+          }
+          await doRegister(fd, companyId);
+        } finally {
+          unlock();
         }
-        await doRegister(fd, companyId);
       });
     }
   });
@@ -620,7 +631,7 @@ async function openSoapModal(queueItem, onDone) {
             <div class="field"><label>Penyebab / Terkena</label><input name="terkena" placeholder="mis. Benturan mesin, chainsaw, dll"></div>
             <div class="field"><label>Lokasi Kejadian</label><input name="lokasiKejadian"></div>
           </div>
-          <div class="field full"><label>Kronologi Kejadian *</label><textarea name="kronologi" id="kronologiKK" required minlength="20" placeholder="Jelaskan urutan kejadian secara ringkas namun jelas: apa yang sedang dikerjakan, apa yang terjadi, dan bagaimana cedera terjadi."></textarea></div>
+          <div class="field full"><label>Kronologi Kejadian *</label><textarea name="kronologi" id="kronologiKK" minlength="20" placeholder="Jelaskan urutan kejadian secara ringkas namun jelas: apa yang sedang dikerjakan, apa yang terjadi, dan bagaimana cedera terjadi."></textarea></div>
           <div class="field full"><label>Tindakan</label><textarea name="tindakan"></textarea></div>
         </div>
       </div>
@@ -721,9 +732,19 @@ async function openSoapModal(queueItem, onDone) {
       body.querySelectorAll('[data-vital]').forEach(input => input.addEventListener('input', checkVitals));
 
       const kerjaBlock = body.querySelector('#kerjaBlock');
+      const kronologiKK = body.querySelector('#kronologiKK');
+      // `required` must track the block's visibility, not just live on the
+      // field permanently: a required field inside a display:none ancestor
+      // is NOT exempt from constraint validation (only disabled/hidden-type
+      // fields are), so leaving it "required" while hidden made Chrome try
+      // to focus it on submit, fail (can't focus a display:none element),
+      // and silently abort the whole save with no visible error — exactly
+      // the "klik simpan tidak merespon" bug this fixes.
       body.querySelector('#jenisKunjungan').addEventListener('change', e => {
-        kerjaBlock.style.display = e.target.value === 'kecelakaan_kerja' ? '' : 'none';
-        if (e.target.value === 'kecelakaan_kerja') applyKkSksRule();
+        const isKerja = e.target.value === 'kecelakaan_kerja';
+        kerjaBlock.style.display = isKerja ? '' : 'none';
+        kronologiKK.required = isKerja;
+        if (isKerja) applyKkSksRule();
       });
       const sksCheckbox = body.querySelector('#sksCheckbox');
       const sksBlock = body.querySelector('#sksBlock');
@@ -819,8 +840,16 @@ async function openSoapModal(queueItem, onDone) {
 
       body.querySelector('#soapForm').addEventListener('submit', async e => {
         e.preventDefault();
-        const fd = new FormData(e.target);
         if (!icdSelected.length && !confirmDialog('Belum ada diagnosa dipilih. Simpan tanpa diagnosa?')) return;
+        // Saving a SOAP visit is several sequential Supabase round trips
+        // (insert visit, dispense each obat line, update biaya_total, maybe
+        // create a sick note) — slow enough on a weak connection to look
+        // unresponsive. Lock the button immediately so it's obvious the
+        // click registered, and so a second click can't fire this whole
+        // handler again on top of the first (duplicate visit + double stock
+        // deduction) while the first save is still in flight.
+        const unlock = lockSubmit(e.target, 'Menyimpan...');
+        const fd = new FormData(e.target);
 
         const jenisKunjungan = fd.get('jenisKunjungan');
         const visitPayload = {
@@ -872,6 +901,8 @@ async function openSoapModal(queueItem, onDone) {
           onDone();
         } catch (err) {
           toast(err.message || 'Gagal menyimpan pemeriksaan', 'err');
+        } finally {
+          unlock();
         }
       });
     }
@@ -904,6 +935,7 @@ function openConsentModal(patient) {
       body.querySelector('#cancelBtn').addEventListener('click', close);
       body.querySelector('#consentForm').addEventListener('submit', async e => {
         e.preventDefault();
+        const unlock = lockSubmit(e.target);
         const fd = new FormData(e.target);
         const form = {
           tanggal: todayStr(), tindakan: fd.get('tindakan').trim(), penjelasanRisiko: fd.get('penjelasanRisiko').trim(),
@@ -921,6 +953,8 @@ function openConsentModal(patient) {
           printMedicalConsentForm(patient, patient.companies || getCompanyById(patient.company_id), fd.get('tipe'), form, sig);
         } catch (err) {
           toast(err.message || 'Gagal menyimpan form', 'err');
+        } finally {
+          unlock();
         }
       });
     }
@@ -970,7 +1004,7 @@ export function openEditVisitModal(visit, onDone) {
             <div class="field"><label>Penyebab / Terkena</label><input name="terkena" value="${escapeHtml(visit.kecelakaan_kerja?.terkena || '')}"></div>
             <div class="field"><label>Lokasi Kejadian</label><input name="lokasiKejadian" value="${escapeHtml(visit.kecelakaan_kerja?.lokasiKejadian || '')}"></div>
           </div>
-          <div class="field full"><label>Kronologi Kejadian *</label><textarea name="kronologi" required minlength="20" placeholder="Jelaskan urutan kejadian secara ringkas namun jelas: apa yang sedang dikerjakan, apa yang terjadi, dan bagaimana cedera terjadi.">${escapeHtml(visit.kecelakaan_kerja?.kronologi || '')}</textarea></div>
+          <div class="field full"><label>Kronologi Kejadian *</label><textarea name="kronologi" id="evKronologiKK" minlength="20" ${visit.jenis_kunjungan === 'kecelakaan_kerja' ? 'required' : ''} placeholder="Jelaskan urutan kejadian secara ringkas namun jelas: apa yang sedang dikerjakan, apa yang terjadi, dan bagaimana cedera terjadi.">${escapeHtml(visit.kecelakaan_kerja?.kronologi || '')}</textarea></div>
           <div class="field full"><label>Tindakan</label><textarea name="tindakan">${escapeHtml(visit.kecelakaan_kerja?.tindakan || '')}</textarea></div>
         </div>
       </div>
@@ -1024,7 +1058,9 @@ export function openEditVisitModal(visit, onDone) {
       body.querySelector('#cancelBtn').addEventListener('click', close);
 
       body.querySelector('#evJenisKunjungan').addEventListener('change', e => {
-        body.querySelector('#evKerjaBlock').style.display = e.target.value === 'kecelakaan_kerja' ? '' : 'none';
+        const isKerja = e.target.value === 'kecelakaan_kerja';
+        body.querySelector('#evKerjaBlock').style.display = isKerja ? '' : 'none';
+        body.querySelector('#evKronologiKK').required = isKerja;
       });
 
       const icdTags = body.querySelector('#evIcdTags');
@@ -1054,6 +1090,7 @@ export function openEditVisitModal(visit, onDone) {
 
       body.querySelector('#editVisitForm').addEventListener('submit', async e => {
         e.preventDefault();
+        const unlock = lockSubmit(e.target);
         const fd = new FormData(e.target);
         const vitals = {};
         body.querySelectorAll('[data-vital]').forEach(input => { if (input.value !== '') vitals[input.dataset.vital] = Number(input.value); });
@@ -1080,6 +1117,8 @@ export function openEditVisitModal(visit, onDone) {
           onDone();
         } catch (err) {
           toast(err.message || 'Gagal menyimpan perubahan', 'err');
+        } finally {
+          unlock();
         }
       });
     }

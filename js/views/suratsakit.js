@@ -1,5 +1,5 @@
 import * as api from '../api.js';
-import { escapeHtml, fmtDate, toast, openModal, mountPatientPicker, todayStr, confirmDialog } from '../util.js';
+import { escapeHtml, fmtDate, toast, openModal, mountPatientPicker, todayStr, confirmDialog, lockSubmit } from '../util.js';
 import { printSickNote } from '../print.js';
 import { openSignatureModal } from '../signatures.js';
 import { getSelectedCompanyId } from '../state.js';
@@ -110,6 +110,7 @@ async function openSickNoteModal(onDone) {
         if (!pickedPatient) { toast('Pilih pasien terlebih dahulu', 'err'); return; }
         const fd = new FormData(e.target);
         if (fd.get('tanggalSelesai') < fd.get('tanggalMulai')) { toast('Tanggal selesai tidak boleh sebelum tanggal mulai', 'err'); return; }
+        const unlock = lockSubmit(e.target);
         try {
           const nomorSurat = await api.nextNomorSurat(pickedPatient.company_id, 'SKS');
           await api.createSickNote({
@@ -122,6 +123,8 @@ async function openSickNoteModal(onDone) {
           onDone();
         } catch (err) {
           toast(err.message || 'Gagal menyimpan surat', 'err');
+        } finally {
+          unlock();
         }
       });
     }
