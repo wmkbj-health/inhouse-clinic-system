@@ -11,44 +11,6 @@ const COMPANY_LOGOS = [
   { code: 'JLA', name: 'PT Jelai Lestari Abadi' }
 ];
 
-// Acacia mangium plantation silhouette (the actual HTI species these
-// companies grow) as inline SVG rather than raster images, so the forest
-// can be laid out procedurally in three swaying parallax rows at any
-// screen width instead of one fixed-size tiled PNG per layer.
-function acaciaForestSvg() {
-  const layers = [
-    { count: 14, y: 190, minR: 22, maxR: 34, color: '#0c3f2c', opacity: 0.55, dur: 9 },
-    { count: 12, y: 220, minR: 30, maxR: 46, color: '#0f5236', opacity: 0.78, dur: 7.5 },
-    { count: 9, y: 255, minR: 42, maxR: 60, color: '#12613f', opacity: 1, dur: 6 }
-  ];
-  const width = 1600;
-  let seed = 42;
-  const rand = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
-
-  const trees = layers.map((layer, li) => {
-    const spacing = width / layer.count;
-    const items = Array.from({ length: layer.count }, (_, i) => {
-      const cx = i * spacing + spacing * (0.3 + rand() * 0.4);
-      const r = layer.minR + rand() * (layer.maxR - layer.minR);
-      const trunkH = r * 0.9;
-      const delay = (rand() * layer.dur).toFixed(2);
-      return `
-        <g class="acacia-tree" style="transform-origin:${cx.toFixed(1)}px ${layer.y}px;animation-duration:${layer.dur}s;animation-delay:-${delay}s">
-          <rect x="${(cx - r * 0.045).toFixed(1)}" y="${layer.y - trunkH * 0.15}" width="${(r * 0.09).toFixed(1)}" height="${(trunkH * 1.15).toFixed(1)}" fill="#3b2a1a" opacity="${layer.opacity}"/>
-          <ellipse cx="${cx.toFixed(1)}" cy="${(layer.y - trunkH).toFixed(1)}" rx="${r.toFixed(1)}" ry="${(r * 0.62).toFixed(1)}" fill="${layer.color}" opacity="${layer.opacity}"/>
-          <ellipse cx="${(cx - r * 0.5).toFixed(1)}" cy="${(layer.y - trunkH * 0.8).toFixed(1)}" rx="${(r * 0.55).toFixed(1)}" ry="${(r * 0.4).toFixed(1)}" fill="${layer.color}" opacity="${layer.opacity * 0.92}"/>
-          <ellipse cx="${(cx + r * 0.5).toFixed(1)}" cy="${(layer.y - trunkH * 0.8).toFixed(1)}" rx="${(r * 0.55).toFixed(1)}" ry="${(r * 0.4).toFixed(1)}" fill="${layer.color}" opacity="${layer.opacity * 0.92}"/>
-        </g>`;
-    }).join('');
-    return `<g class="acacia-layer" data-layer="${li}">${items}</g>`;
-  }).join('');
-
-  return `
-    <svg class="login-bg-forest" viewBox="0 0 ${width} 300" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
-      ${trees}
-    </svg>`;
-}
-
 export function renderLogin(root, onSuccess) {
   // Purely cosmetic (no auth implication) — app.js persists the code of
   // whichever PT was last shown in the sidebar, so a returning user sees
@@ -58,16 +20,19 @@ export function renderLogin(root, onSuccess) {
 
   root.innerHTML = `
     <div class="login-screen">
-      <div class="login-visual">
-        <div class="login-bg-sun"></div>
-        <div class="login-bg-clouds">
-          <span class="cloud c1"></span><span class="cloud c2"></span><span class="cloud c3"></span>
+      <div class="login-visual" id="loginVisual">
+        <div class="login-mesh" id="loginMesh">
+          <span class="login-blob b1"></span>
+          <span class="login-blob b2"></span>
+          <span class="login-blob b3"></span>
         </div>
-        <div class="login-bg-sparkle">
-          ${Array.from({ length: 14 }).map((_, i) => `<span class="spark s${i % 7}"></span>`).join('')}
-        </div>
-        ${acaciaForestSvg()}
-        <div class="login-visual-copy">
+        <div class="login-grid"></div>
+        <svg class="login-ecg" viewBox="0 0 1200 60" preserveAspectRatio="none" aria-hidden="true">
+          <path d="M0,32 L140,32 L162,32 L178,10 L196,54 L214,20 L230,32 L420,32
+                   L600,32 L622,32 L638,10 L656,54 L674,20 L690,32 L880,32
+                   L1060,32 L1082,32 L1098,10 L1116,54 L1134,20 L1150,32 L1200,32" />
+        </svg>
+        <div class="login-visual-copy" id="loginCopy">
           <h2>Klinik Digital Terpadu</h2>
           <p>Satu sistem untuk pendaftaran pasien, rekam medis, apotek FEFO, surat sakit, dan rujukan — terhubung real-time di setiap unit klinik perusahaan.</p>
         </div>
@@ -100,6 +65,34 @@ export function renderLogin(root, onSuccess) {
       </div>
     </div>
   `;
+
+  // Subtle mouse-parallax on the mesh blobs and copy text — depth cues that
+  // read as "alive"/interactive without any cartoon motion. Skipped
+  // entirely under prefers-reduced-motion, and on touch devices there's no
+  // hover to drive it anyway so it simply never fires.
+  const visual = root.querySelector('#loginVisual');
+  const mesh = root.querySelector('#loginMesh');
+  const copy = root.querySelector('#loginCopy');
+  if (visual && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    let rafId = null, targetX = 0, targetY = 0, curX = 0, curY = 0;
+    function tick() {
+      curX += (targetX - curX) * 0.08;
+      curY += (targetY - curY) * 0.08;
+      mesh.style.transform = `translate(${curX * 1.6}px, ${curY * 1.6}px)`;
+      copy.style.transform = `translate(${curX * -0.4}px, ${curY * -0.4}px)`;
+      rafId = (Math.abs(targetX - curX) > 0.05 || Math.abs(targetY - curY) > 0.05) ? requestAnimationFrame(tick) : null;
+    }
+    visual.addEventListener('mousemove', e => {
+      const r = visual.getBoundingClientRect();
+      targetX = ((e.clientX - r.left) / r.width - 0.5) * 24;
+      targetY = ((e.clientY - r.top) / r.height - 0.5) * 24;
+      if (!rafId) rafId = requestAnimationFrame(tick);
+    });
+    visual.addEventListener('mouseleave', () => {
+      targetX = 0; targetY = 0;
+      if (!rafId) rafId = requestAnimationFrame(tick);
+    });
+  }
 
   const connDot = root.querySelector('#loginConnDot');
   const connLabel = root.querySelector('#loginConnLabel');

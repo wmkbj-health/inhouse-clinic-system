@@ -47,12 +47,13 @@ function renderShell() {
   appRoot.innerHTML = `
     <div class="app">
       <aside class="sidebar" id="sidebar">
+        <button class="sidebar-toggle" id="sidebarToggle" type="button">&#10094;</button>
         <div class="brand">
           <img src="assets/app-icon.png" alt="Logo">
           <div><div class="name">Inhouse Clinic System</div><div class="sub">Klinik Digital Terpadu</div></div>
         </div>
         <div id="companyBadge"></div>
-        <button class="notif-btn notif-btn-sidebar" id="notifBtnSidebar" aria-label="Notifikasi" hidden>&#128276; <span id="notifLabel">Notifikasi</span><span class="notif-dot" hidden></span></button>
+        <button class="notif-btn notif-btn-sidebar" id="notifBtnSidebar" aria-label="Notifikasi" title="Notifikasi" hidden>&#128276; <span id="notifLabel">Notifikasi</span><span class="notif-dot" hidden></span></button>
         <div class="field" style="margin-bottom:14px">
           <label style="color:rgba(255,255,255,.8)">Perusahaan</label>
           <div class="company-switcher" id="companySwitcher"></div>
@@ -63,8 +64,8 @@ function renderShell() {
         </div>
         <nav class="nav" id="nav"></nav>
         <div class="sidebar-foot">
-          Masuk sebagai <b>${profile.full_name}</b> (${ROLE_LABEL[profile.role]})<br>
-          <button id="logoutBtn" class="btn btn-outline btn-sm" style="margin-top:8px;width:100%;color:#fff;border-color:rgba(255,255,255,.4)">Keluar</button>
+          <span class="sidebar-foot-user">Masuk sebagai <b>${profile.full_name}</b> (${ROLE_LABEL[profile.role]})</span>
+          <button id="logoutBtn" class="btn btn-outline btn-sm" title="Keluar" style="margin-top:8px;width:100%;color:#fff;border-color:rgba(255,255,255,.4)">Keluar</button>
         </div>
       </aside>
       <div class="main">
@@ -89,6 +90,7 @@ function renderShell() {
   renderCompanyBadge();
 
   buildNav();
+  initSidebarToggle();
   document.getElementById('logoutBtn').addEventListener('click', async () => { stopRealtimeSync(); await signOut(); boot(); });
 
   // Patient-level search — never exposed to "viewer" (dashboard-only,
@@ -327,8 +329,33 @@ function bindOutsideClickOnce() {
 function buildNav() {
   const navEl = document.getElementById('nav');
   navEl.innerHTML = Object.entries(ROUTES).filter(([, r]) => hasRole(...r.roles)).map(([key, r]) =>
-    `<a href="#${key}" data-key="${key}"><span class="ic">${r.icon}</span>${r.label}</a>`
+    `<a href="#${key}" data-key="${key}" title="${escapeHtml(r.label)}"><span class="ic">${r.icon}</span><span class="nav-label">${r.label}</span></a>`
   ).join('');
+}
+
+const SIDEBAR_COLLAPSE_KEY = 'ics_sidebar_collapsed';
+
+function initSidebarToggle() {
+  const btn = document.getElementById('sidebarToggle');
+  if (!btn) return;
+  const appEl = document.querySelector('.app');
+  let collapsed = false;
+  try { collapsed = localStorage.getItem(SIDEBAR_COLLAPSE_KEY) === '1'; } catch (e) { /* ignore */ }
+  function paint() {
+    appEl.classList.toggle('sidebar-collapsed', collapsed);
+    btn.setAttribute('aria-label', collapsed ? 'Perluas sidebar' : 'Ciutkan sidebar');
+    btn.title = collapsed ? 'Perluas sidebar' : 'Ciutkan sidebar';
+  }
+  paint();
+  btn.addEventListener('click', () => {
+    collapsed = !collapsed;
+    try { localStorage.setItem(SIDEBAR_COLLAPSE_KEY, collapsed ? '1' : '0'); } catch (e) { /* ignore */ }
+    paint();
+    // Closing the company-switcher/notif panels avoids them being left open
+    // and misaligned against the now-narrower sidebar.
+    const csPanel = document.getElementById('csPanel');
+    if (csPanel) csPanel.hidden = true;
+  });
 }
 
 async function route() {

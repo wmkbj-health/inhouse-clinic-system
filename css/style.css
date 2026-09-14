@@ -60,17 +60,45 @@ body {
 .login-visual {
   flex: 1.15; min-width: 0; display: flex; align-items: flex-end; justify-content: center;
   padding: 48px 32px; position: relative; overflow: hidden;
-  background: #0d1e2e url('../assets/login-bg.jpg') center / cover no-repeat;
+  background: linear-gradient(160deg, #0a1826 0%, #0d2e3a 55%, #0a2530 100%);
 }
 .login-visual::before {
-  /* Slightly deepens the lower-left corner behind the copy text for
-     contrast, without needing any illustration or animation. */
-  content: ''; position: absolute; inset: 0; pointer-events: none;
+  /* Deepens the lower-left corner behind the copy text for contrast. */
+  content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 1;
   background: linear-gradient(200deg, rgba(0,0,0,0) 40%, rgba(5,15,22,.55) 100%);
 }
+/* Slowly drifting soft gradient blobs — an animated mesh-gradient, the
+   look modern SaaS login screens use in place of static art. Each blob
+   also nudges toward the cursor (see the mousemove handler in login.js)
+   for a subtle sense of depth/interactivity, not just a looping video. */
+.login-mesh { position: absolute; inset: -15%; filter: blur(70px); transition: transform .1s linear; }
+.login-blob { position: absolute; border-radius: 50%; opacity: .6; }
+.login-blob.b1 { width: 46vw; height: 46vw; min-width: 340px; min-height: 340px; top: -8%; left: -6%; background: radial-gradient(circle, var(--primary), transparent 70%); animation: driftA 24s ease-in-out infinite; }
+.login-blob.b2 { width: 38vw; height: 38vw; min-width: 280px; min-height: 280px; bottom: -12%; left: 18%; background: radial-gradient(circle, var(--accent), transparent 70%); animation: driftB 30s ease-in-out infinite; }
+.login-blob.b3 { width: 30vw; height: 30vw; min-width: 220px; min-height: 220px; top: 18%; right: -10%; background: radial-gradient(circle, #12b8a6, transparent 70%); animation: driftC 20s ease-in-out infinite; }
+@keyframes driftA { 0%, 100% { transform: translate(0, 0) scale(1); } 50% { transform: translate(4%, 6%) scale(1.08); } }
+@keyframes driftB { 0%, 100% { transform: translate(0, 0) scale(1); } 50% { transform: translate(-5%, -4%) scale(1.06); } }
+@keyframes driftC { 0%, 100% { transform: translate(0, 0) scale(1); } 50% { transform: translate(-6%, 5%) scale(1.1); } }
+/* Faint grid for texture — reads as "data/system", stays out of the way. */
+.login-grid {
+  position: absolute; inset: 0; pointer-events: none;
+  background-image: linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(circle at 45% 55%, black, transparent 75%);
+  -webkit-mask-image: radial-gradient(circle at 45% 55%, black, transparent 75%);
+}
+/* A slow, continuous ECG trace along the bottom — the one deliberately
+   "clinical" touch, thin and low-opacity so it reads as a subtle system
+   heartbeat rather than a cartoon flourish. */
+.login-ecg { position: absolute; left: 0; right: 0; bottom: 8%; width: 200%; height: 40px; opacity: .3; animation: ecgScroll 9s linear infinite; }
+.login-ecg path { fill: none; stroke: #fff; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+@keyframes ecgScroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) {
+  .login-blob, .login-ecg { animation: none !important; }
+}
 .login-visual-copy {
-  position: relative; z-index: 1; color: #fff; max-width: 420px; margin-bottom: 6%;
-  text-shadow: 0 2px 10px rgba(0,0,0,.35);
+  position: relative; z-index: 2; color: #fff; max-width: 420px; margin-bottom: 6%;
+  text-shadow: 0 2px 10px rgba(0,0,0,.35); transition: transform .1s linear;
 }
 .login-visual-copy h2 { font-size: 1.5rem; font-weight: 800; margin-bottom: 10px; letter-spacing: -.01em; }
 .login-visual-copy p { font-size: .92rem; line-height: 1.5; opacity: .95; }
@@ -135,8 +163,43 @@ button, input, select, textarea { font-family: inherit; font-size: .95rem; color
   overflow-y: auto;
   overflow-x: hidden;
   box-shadow: 2px 0 24px rgba(0,0,0,.18);
+  transition: width .2s ease, min-width .2s ease, max-width .2s ease, padding .2s ease;
 }
-.main { margin-left: 250px; }
+.main { margin-left: 250px; transition: margin-left .2s ease; }
+
+/* Collapsed sidebar — icons-only rail so the content area gets more room.
+   Toggled on .app (not .sidebar directly) so .main's margin can react to
+   the same class without extra JS bookkeeping. */
+.sidebar-toggle {
+  position: absolute; top: 18px; right: -13px; z-index: 5;
+  width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--bg);
+  background: var(--primary); color: #fff; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; font-size: .7rem;
+  box-shadow: 0 2px 8px rgba(0,0,0,.25); transition: transform .2s ease, background .15s;
+}
+.sidebar-toggle:hover { background: var(--primary-2); }
+.app.sidebar-collapsed .sidebar { width: 76px; min-width: 76px; max-width: 76px; padding: 20px 10px; }
+.app.sidebar-collapsed .main { margin-left: 76px; }
+.app.sidebar-collapsed .sidebar-toggle { transform: rotate(180deg); }
+.app.sidebar-collapsed .brand { justify-content: center; padding: 4px 0 20px; }
+.app.sidebar-collapsed .brand .name, .app.sidebar-collapsed .brand .sub { display: none; }
+.app.sidebar-collapsed #companyBadge,
+.app.sidebar-collapsed .sidebar > .field,
+.app.sidebar-collapsed .global-search,
+.app.sidebar-collapsed .nav-label,
+.app.sidebar-collapsed .notif-btn-sidebar #notifLabel,
+.app.sidebar-collapsed .sidebar-foot > *:not(#logoutBtn) { display: none; }
+.app.sidebar-collapsed .nav a { justify-content: center; padding: 10px; }
+.app.sidebar-collapsed .nav a .ic { width: auto; font-size: 1.05rem; }
+.app.sidebar-collapsed .nav a.active::before { left: -10px; }
+.app.sidebar-collapsed .notif-btn-sidebar { justify-content: center; padding: 8px; }
+.app.sidebar-collapsed .notif-btn-sidebar .notif-dot { position: absolute; top: 2px; right: 2px; margin-left: 0; }
+.app.sidebar-collapsed .sidebar-foot { padding-top: 10px; display: flex; justify-content: center; }
+.app.sidebar-collapsed #logoutBtn { width: 36px; height: 36px; padding: 0; font-size: 0; position: relative; }
+.app.sidebar-collapsed #logoutBtn::before { content: '\23FB'; font-size: 1rem; }
+@media (max-width: 900px) {
+  .app.sidebar-collapsed .main { margin-left: 76px; }
+}
 .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 20px; }
 .brand img { width: 40px; height: 40px; border-radius: 10px; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
 .brand .name { font-weight: 700; font-size: 1.02rem; line-height: 1.15; }
@@ -155,6 +218,7 @@ button, input, select, textarea { font-family: inherit; font-size: .95rem; color
 .nav a.active { background: rgba(255,255,255,.24); opacity: 1; font-weight: 700; box-shadow: inset 0 0 0 1px rgba(255,255,255,.15); }
 .nav a.active::before { content: ''; position: absolute; left: -14px; top: 50%; transform: translateY(-50%); width: 4px; height: 20px; border-radius: 0 4px 4px 0; background: #fff; }
 .sidebar-foot { font-size: .68rem; opacity: .75; padding: 10px 8px 0; }
+.sidebar-foot-user { display: block; }
 
 .notif-btn {
   position: relative; background: none; border: none; font-size: 1.15rem; cursor: pointer;
@@ -316,6 +380,22 @@ tbody tr:last-child td { border-bottom: none; }
 .chart-legend-item { display: flex; align-items: center; gap: 8px; }
 .chart-legend-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
 
+/* Modern chart touches: a draw-in animation for the trend line, a lift on
+   hover for bars/donut segments, and the donut's center total label. */
+.chart-line-path { stroke-dashoffset: 1; animation: chartDraw 1s ease-out forwards; }
+@keyframes chartDraw { to { stroke-dashoffset: 0; } }
+.chart-dot { transition: r .15s ease; }
+.chart-dot:hover { r: 5.5; }
+.chart-bar-rect { transition: opacity .15s ease; transform-origin: bottom center; }
+.chart-bar-rect:hover { opacity: .82; }
+.chart-donut-seg { transition: opacity .15s ease; }
+.chart-donut-seg:hover { opacity: .8; }
+.chart-donut-total { font-size: 26px; font-weight: 800; fill: var(--text); }
+.chart-donut-label { font-size: 10px; fill: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+@media (prefers-reduced-motion: reduce) {
+  .chart-line-path { animation: none; stroke-dashoffset: 0; }
+}
+
 /* ---------- Queue / list rows ---------- */
 .list-row {
   display: flex; align-items: center; gap: 12px; padding: 12px 10px; border-bottom: 1px solid var(--border);
@@ -366,6 +446,30 @@ tbody tr:last-child td { border-bottom: none; }
   .main { margin-left: 210px; }
   .view { padding: 18px 14px 50px; }
 }
+
+/* Dashboard-only backdrop — a soft brand-colored wash instead of the flat
+   --bg used everywhere else, so the KPI/chart-heavy landing page reads as
+   a distinct "home" rather than another data-table screen. Bleeds to the
+   true edges of the content column via negative margins equal to .view's
+   own padding, then re-applies that padding so nothing else shifts. */
+.dash-canvas {
+  margin: -26px -30px -60px; padding: 26px 30px 60px;
+  background:
+    radial-gradient(1100px 480px at 8% -8%, rgba(30,136,229,.12), transparent 60%),
+    radial-gradient(900px 460px at 100% 4%, rgba(67,160,71,.10), transparent 58%),
+    var(--bg);
+}
+@media (max-width: 900px) {
+  .dash-canvas { margin: -18px -14px -50px; padding: 18px 14px 50px; }
+}
+.stat-icon {
+  width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center;
+  font-size: 1rem; margin-bottom: 10px; background: var(--surface-2);
+}
+.stat.primary .stat-icon { background: color-mix(in srgb, var(--primary) 16%, var(--surface-2)); }
+.stat.accent .stat-icon { background: color-mix(in srgb, var(--accent) 16%, var(--surface-2)); }
+.stat.warn .stat-icon { background: color-mix(in srgb, var(--warn) 18%, var(--surface-2)); }
+.stat.danger .stat-icon { background: color-mix(in srgb, var(--danger) 16%, var(--surface-2)); }
 
 .company-badge { display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,.1); border-radius: 10px; padding: 8px 10px; margin-bottom: 4px; }
 .company-badge img { width: 32px; height: 32px; object-fit: contain; background: #fff; border-radius: 6px; padding: 2px; }

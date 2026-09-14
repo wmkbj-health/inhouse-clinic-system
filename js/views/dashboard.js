@@ -14,6 +14,7 @@ export async function renderDashboard(root) {
   const canSeeAttention = hasRole('dokter', 'perawat');
 
   root.innerHTML = `
+    <div class="dash-canvas">
     <div class="view-head">
       <div><h1>Dashboard</h1><p class="desc">Ringkasan operasional klinik</p></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -49,6 +50,7 @@ export async function renderDashboard(root) {
     <div class="panel"><h2>Top Five Disease per Departemen</h2><div class="table-wrap" id="topDeptDiseases"></div></div>
     ${isAllCompanies() ? `<div class="panel"><h2>Perbandingan Antar PT</h2><p class="desc" style="margin-bottom:10px">Total per PT untuk tahun terpilih (hanya PT yang bisa diakses akun ini).</p><div class="table-wrap" id="companyComparison"></div></div>` : ''}
     ${canSeeAttention ? `<div class="panel"><h2>Perlu Perhatian <span class="muted" id="attentionCount"></span></h2><p class="desc" style="margin-bottom:10px">Pasien dengan tanda vital abnormal, riwayat penyakit kronis, kasus LTI, observasi/rawat inap terbaru, atau masih dalam masa istirahat.</p><div id="attention"></div></div>` : ''}
+    </div>
   `;
 
   const yearSel = root.querySelector('#yearFilter');
@@ -77,10 +79,10 @@ export async function renderDashboard(root) {
     const menunggu = queue.filter(q => q.status === 'menunggu').length;
 
     root.querySelector('#statCards').innerHTML = `
-      <div class="card stat primary"><div class="label">Total Kunjungan (${year})</div><div class="value">${totalKunjungan}</div><div class="hint">${queue.length} antrian hari ini (${menunggu} menunggu)</div></div>
-      <div class="card stat accent"><div class="label">Total Surat Sakit</div><div class="value">${totalSks}</div><div class="hint">Tahun ${year}</div></div>
-      <div class="card stat warn"><div class="label">Total Rujukan Keluar</div><div class="value">${totalRujukan}</div><div class="hint">Tahun ${year}</div></div>
-      <div class="card stat danger"><div class="label">Total Kecelakaan Kerja</div><div class="value">${totalKk}</div><div class="hint">${['FA','MA','LTI'].map(t => `${t}: ${kpis.kk.find(k => k.tingkat === t)?.jumlah || 0}`).join(' • ')}</div></div>
+      <div class="card stat primary"><div class="stat-icon">&#128100;</div><div class="label">Total Kunjungan (${year})</div><div class="value">${totalKunjungan}</div><div class="hint">${queue.length} antrian hari ini (${menunggu} menunggu)</div></div>
+      <div class="card stat accent"><div class="stat-icon">&#9995;</div><div class="label">Total Surat Sakit</div><div class="value">${totalSks}</div><div class="hint">Tahun ${year}</div></div>
+      <div class="card stat warn"><div class="stat-icon">&#8594;</div><div class="label">Total Rujukan Keluar</div><div class="value">${totalRujukan}</div><div class="hint">Tahun ${year}</div></div>
+      <div class="card stat danger"><div class="stat-icon">&#9888;</div><div class="label">Total Kecelakaan Kerja</div><div class="value">${totalKk}</div><div class="hint">${['FA','MA','LTI'].map(t => `${t}: ${kpis.kk.find(k => k.tingkat === t)?.jumlah || 0}`).join(' • ')}</div></div>
     `;
 
     const bulanan = kpis.kunjunganBulanan || [];

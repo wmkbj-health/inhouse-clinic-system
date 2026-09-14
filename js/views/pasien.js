@@ -594,7 +594,11 @@ function openRegistrationSuccessModal(patient, posisi) {
 
 async function openSoapModal(queueItem, onDone) {
   const patient = await api.getPatient(queueItem.patient_id);
-  const drugs = await api.listDrugsWithStock();
+  // Scoped to this patient's own PT, not whatever the sidebar's PT switcher
+  // happens to be set to — a visit only ever draws stock from its own
+  // patient's company, so under "Semua PT" the sidebar-scoped total would
+  // overstate what's really available here and fail at save time instead.
+  const drugs = await api.listDrugsWithStock({ companyId: patient.company_id });
   const diseaseCodes = getDiseaseCodes();
   const icdSelected = [];
   const obatSelected = [];
