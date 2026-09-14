@@ -327,6 +327,7 @@ input[type="checkbox"], input[type="radio"] { width: 16px; height: 16px; accent-
 }
 .btn:active { transform: scale(.98); }
 .btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.btn.is-busy { opacity: .55; cursor: wait; pointer-events: none; }
 .btn-primary { background: var(--primary); color: #fff; box-shadow: 0 4px 14px rgba(30,136,229,.32); }
 .btn-primary:hover { filter: brightness(1.08); box-shadow: 0 6px 18px rgba(30,136,229,.4); }
 .btn-accent { background: var(--accent); color: #fff; box-shadow: 0 4px 14px rgba(67,160,71,.3); }

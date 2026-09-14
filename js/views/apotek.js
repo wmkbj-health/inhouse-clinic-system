@@ -1,5 +1,5 @@
 import * as api from '../api.js';
-import { escapeHtml, fmtDate, toast, openModal, debounce, todayStr, confirmDialog, lockSubmit } from '../util.js';
+import { escapeHtml, fmtDate, toast, openModal, debounce, todayStr, confirmDialog, lockSubmit, busyClick } from '../util.js';
 import { getDrugCategories, getSelectedCompanyId, isAllCompanies, getCompanyById, consumePendingApotekFilter } from '../state.js';
 import { printStocktake, printDrugRequest, printExpiryWriteoff, printRko } from '../print.js';
 import { openSignatureModal } from '../signatures.js';
@@ -781,7 +781,7 @@ function openExpiryWriteoffModal(drugs, onDone) {
             <td><button class="btn btn-sm btn-outline" data-view="${r.id}">Lihat/Cetak</button></td>
           </tr>`).join('')}</tbody>
         </table></div>` : `<div class="empty">Belum ada Berita Acara Kadaluwarsa.</div>`;
-        ewBody.querySelectorAll('[data-view]').forEach(btn => btn.addEventListener('click', async () => {
+        ewBody.querySelectorAll('[data-view]').forEach(btn => btn.addEventListener('click', e => busyClick(e.currentTarget, async () => {
           const r = rows.find(x => x.id === btn.dataset.view);
           const company = getCompanyById(r.company_id);
           const sig = await api.getPrintSignatures(r.company_id);
@@ -789,7 +789,7 @@ function openExpiryWriteoffModal(drugs, onDone) {
             drugId: it.drug_id, batchId: it.batch_id, nama: it.drugs?.nama || '-', satuan: it.drugs?.satuan || it.satuan, qty: it.qty
           }));
           printExpiryWriteoff({ ...r, items }, company, sig);
-        }));
+        })));
       }
 
       setTab('baru');

@@ -123,3 +123,25 @@ export function lockSubmit(form, label = 'Menyimpan...') {
   btn.textContent = label;
   return () => { btn.disabled = false; btn.textContent = original; };
 }
+
+// Same problem as lockSubmit(), for the far more common case of a plain
+// button that fetches something (getPatient, getVisit, print signatures,
+// …) before it can open a modal or print — often 1-3 sequential Supabase
+// round trips with nothing on screen changing until the very last one
+// resolves. On a slow connection that reads as "the app isn't responding",
+// and an impatient extra click re-enters the handler on top of the first
+// (two stacked modals, a double print, etc). Wrap the whole handler body:
+//   btn.addEventListener('click', () => busyClick(btn, async () => { ... }));
+// The button dims immediately on click (instant feedback) and can't be
+// clicked again until the work finishes either way.
+export async function busyClick(btn, fn) {
+  if (!btn || btn.disabled) return;
+  btn.disabled = true;
+  btn.classList.add('is-busy');
+  try {
+    return await fn();
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove('is-busy');
+  }
+}

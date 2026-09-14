@@ -1,5 +1,5 @@
 import * as api from '../api.js';
-import { escapeHtml, fmtDate, debounce } from '../util.js';
+import { escapeHtml, fmtDate, debounce, busyClick } from '../util.js';
 import { openEditVisitModal } from './pasien.js';
 
 const TINGKAT_INFO = {
@@ -68,7 +68,7 @@ export async function renderKecelakaan(root) {
         <td><button class="btn btn-sm btn-outline" data-detail="${v.id}">Detail/Edit</button></td>
       </tr>`;
     }).join('');
-    rows.querySelectorAll('[data-detail]').forEach(btn => btn.addEventListener('click', async () => {
+    rows.querySelectorAll('[data-detail]').forEach(btn => btn.addEventListener('click', e => busyClick(e.currentTarget, async () => {
       const full = await api.getVisit(btn.dataset.detail);
       // Reusing the same edit-visit modal Riwayat Kunjungan uses — this is
       // the same visits row, so a correction here is already in sync with
@@ -77,7 +77,7 @@ export async function renderKecelakaan(root) {
         cases.splice(0, cases.length, ...await api.listKecelakaanKerja());
         applyFilters();
       });
-    }));
+    })));
   }
   draw(cases);
 

@@ -125,8 +125,14 @@ function renderShell() {
   if (hasRole('dokter', 'perawat')) {
     startRealtimeSync(() => {
       // Skip while a modal is open so a remote update never yanks a form
-      // the user is actively filling in out from under them.
+      // the user is actively filling in out from under them. Also skip
+      // while focus is sitting in any text/search input on the page (e.g.
+      // typing in the patient list search or a filter box outside a modal)
+      // — route() fully redraws that view, which would otherwise wipe out
+      // whatever was just typed and make the field feel unresponsive.
       if (document.querySelector('.modal-bg')) return;
+      const active = document.activeElement;
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) return;
       route();
       renderAlertBanner();
       refreshNotifications();

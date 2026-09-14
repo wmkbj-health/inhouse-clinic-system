@@ -1,5 +1,5 @@
 import * as api from '../api.js';
-import { el, escapeHtml, fmtDate, toast, openModal, debounce, confirmDialog, todayStr, lockSubmit } from '../util.js';
+import { el, escapeHtml, fmtDate, toast, openModal, debounce, confirmDialog, todayStr, lockSubmit, busyClick } from '../util.js';
 import { getCompanies, getCompanyById, getSelectedCompanyId, isAllCompanies, getDiseaseCodes, fmtAge, consumePendingPatientOpen } from '../state.js';
 import { printPatientCard, printMedicalConsentForm, printResep } from '../print.js';
 import { hasRole } from '../auth.js';
@@ -141,10 +141,10 @@ async function renderQueueTab(container) {
           <button class="btn btn-sm btn-outline" data-action="hapus">Hapus</button>
         </div>
       </div>`);
-    row.querySelector('[data-action="periksa"]')?.addEventListener('click', async () => {
+    row.querySelector('[data-action="periksa"]')?.addEventListener('click', e => busyClick(e.currentTarget, async () => {
       await api.updateQueueStatus(q.id, 'diperiksa');
-      openSoapModal(q, () => renderQueueTab(container));
-    });
+      await openSoapModal(q, () => renderQueueTab(container));
+    }));
     row.querySelector('[data-action="lihat"]')?.addEventListener('click', () => toast('Pemeriksaan sudah selesai. Lihat riwayat di Daftar Pasien.'));
     row.querySelector('[data-action="hapus"]')?.addEventListener('click', async () => {
       if (!confirmDialog(`Hapus antrian ${q.patients?.nama}?`)) return;
@@ -214,12 +214,14 @@ async function renderPatientListTab(container) {
       const p = currentList.find(x => x.id === tr.dataset.detail);
       openPatientDetailModal(p, () => draw(container.querySelector('#patSearch').value.trim()));
     }));
-    rows.querySelectorAll('[data-daftar]').forEach(btn => btn.addEventListener('click', async e => {
+    rows.querySelectorAll('[data-daftar]').forEach(btn => btn.addEventListener('click', e => {
       e.stopPropagation();
-      const p = currentList.find(x => x.id === btn.dataset.daftar);
-      const q = await api.addToQueue(p.company_id, p, '', p.status_pegawai === 'mitra_kerja' ? 'Poli Kecelakaan Kerja / Umum' : 'Poli Umum');
-      const posisi = await api.queuePositionToday(p.company_id, q.id);
-      toast(`${p.nama} masuk antrian — Nomor Antrian: ${posisi}`);
+      busyClick(e.currentTarget, async () => {
+        const p = currentList.find(x => x.id === btn.dataset.daftar);
+        const q = await api.addToQueue(p.company_id, p, '', p.status_pegawai === 'mitra_kerja' ? 'Poli Kecelakaan Kerja / Umum' : 'Poli Umum');
+        const posisi = await api.queuePositionToday(p.company_id, q.id);
+        toast(`${p.nama} masuk antrian — Nomor Antrian: ${posisi}`);
+      });
     }));
     rows.querySelectorAll('[data-hapus]').forEach(btn => btn.addEventListener('click', async e => {
       e.stopPropagation();
@@ -289,11 +291,11 @@ function openPatientDetailModal(patient, onChange) {
     <div class="table-wrap" id="visitHistory"><div class="empty">Memuat...</div></div>
   `, {
     onMount: async (body, close) => {
-      body.querySelector('#btnDaftarAntrian').addEventListener('click', async () => {
+      body.querySelector('#btnDaftarAntrian').addEventListener('click', e => busyClick(e.currentTarget, async () => {
         const q = await api.addToQueue(patient.company_id, patient, '', patient.status_pegawai === 'mitra_kerja' ? 'Poli Kecelakaan Kerja / Umum' : 'Poli Umum');
         const posisi = await api.queuePositionToday(patient.company_id, q.id);
         toast(`${patient.nama} masuk antrian — Nomor Antrian: ${posisi}`);
-      });
+      }));
       body.querySelector('#btnCetakKartu').addEventListener('click', () => printPatientCard(patient, patient.companies));
       body.querySelector('#btnEditPasien').addEventListener('click', () => { close(); openEditPatientModal(patient, onChange); });
       body.querySelector('#btnConsent').addEventListener('click', () => { close(); openConsentModal(patient); });
@@ -333,10 +335,10 @@ function openPatientDetailModal(patient, onChange) {
             <td>${escapeHtml(v.disposisi)}</td><td>Rp ${Number(v.biaya_total || 0).toLocaleString('id-ID')}</td>
             <td><button class="btn btn-sm btn-outline" data-edit-visit="${v.id}">Edit</button></td>
           </tr>`).join('')}</tbody></table>` : `<div class="empty">Belum ada riwayat kunjungan.</div>`;
-        histEl.querySelectorAll('[data-edit-visit]').forEach(btn => btn.addEventListener('click', async () => {
+        histEl.querySelectorAll('[data-edit-visit]').forEach(btn => btn.addEventListener('click', e => busyClick(e.currentTarget, async () => {
           const full = await api.getVisit(btn.dataset.editVisit);
           openEditVisitModal(full, drawHistory);
-        }));
+        })));
       }
       drawHistory();
     }

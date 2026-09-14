@@ -1,5 +1,5 @@
 import * as api from '../api.js';
-import { escapeHtml, fmtDate, toast, openModal, mountPatientPicker, todayStr, confirmDialog, lockSubmit } from '../util.js';
+import { escapeHtml, fmtDate, toast, openModal, mountPatientPicker, todayStr, confirmDialog, lockSubmit, busyClick } from '../util.js';
 import { printReferral } from '../print.js';
 import { openSignatureModal } from '../signatures.js';
 import { getSelectedCompanyId } from '../state.js';
@@ -40,12 +40,12 @@ export async function renderRujukan(root) {
           <button class="btn btn-sm btn-danger" data-hapus="${r.id}">Hapus</button>
         </td>
       </tr>`).join('');
-    rows.querySelectorAll('[data-print]').forEach(btn => btn.addEventListener('click', async () => {
+    rows.querySelectorAll('[data-print]').forEach(btn => btn.addEventListener('click', e => busyClick(e.currentTarget, async () => {
       const r = referrals.find(x => x.id === btn.dataset.print);
       const patient = await api.getPatient(r.patient_id);
       const sig = await api.getPrintSignatures(r.company_id);
       printReferral(r, patient, patient.companies, sig);
-    }));
+    })));
     rows.querySelectorAll('[data-hapus]').forEach(btn => btn.addEventListener('click', async () => {
       const r = referrals.find(x => x.id === btn.dataset.hapus);
       if (!confirmDialog(`Hapus data rujukan ${r.patients?.nama || ''} ke ${r.faskes_tujuan}?`)) return;
