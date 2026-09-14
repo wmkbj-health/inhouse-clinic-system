@@ -5,8 +5,12 @@
 // clinical judgment call for the examining dokter/perawat.
 //
 // Sources:
-// - Tekanan darah: Konsensus Penatalaksanaan Hipertensi 2019, Perhimpunan
-//   Dokter Hipertensi Indonesia (InaSH), selaras dengan ACC/AHA 2017.
+// - Tekanan darah: tabel staging Optimal/Normal/Normal-Tinggi/Derajat 1-3
+//   dari Konsensus Penatalaksanaan Hipertensi 2019 (Perhimpunan Dokter
+//   Hipertensi Indonesia/InaSH), yang mengikuti format ESC/ESH — BUKAN
+//   ACC/AHA 2017 (ACC/AHA memakai kategori berbeda: Normal <120/80,
+//   Elevated 120-129/<80, Stage 1 130-139/80-89, Stage 2 >=140/90).
+//   Jangan disamakan keduanya bila suatu saat merujuk literatur AS.
 // - SpO2: WHO Pulse Oximetry Training Manual — hipoksemia <95%, berat <90%.
 // - Suhu tubuh: Kemenkes RI (Pedoman Tatalaksana Demam) / WHO — demam bila
 //   suhu aksila/oral >=38.0 C.
