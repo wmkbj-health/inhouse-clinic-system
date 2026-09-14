@@ -210,11 +210,21 @@ export async function stockAlerts() {
 }
 
 // ---------------- Drugs / FEFO ----------------
-export async function listDrugsWithStock({ includeArchived = false } = {}) {
+// companyId: scopes which PT's batches count toward `stok` — defaults to
+// whatever the sidebar's PT switcher is currently set to (including "all",
+// which sums every accessible PT's batches together for an overview). Pass
+// a specific patient's company_id explicitly wherever the stock number is
+// about to be used to decide what can actually be dispensed to THAT
+// patient (e.g. the SOAP obat picker) — a visit can only draw from its own
+// patient's PT, so under "Semua PT" the sidebar-scoped total silently
+// overstates what's really available and dispenseFefo() (which always
+// filters by the visit's own company_id) then fails with "stok tidak
+// mencukupi" even though the picker just showed plenty of stock.
+export async function listDrugsWithStock({ includeArchived = false, companyId } = {}) {
   let drugQ = supabase.from('drugs').select('*, drug_categories(name)').order('nama');
   if (!includeArchived) drugQ = drugQ.is('deleted_at', null);
   const drugs = unwrap(await drugQ);
-  const sel = getSelectedCompanyId();
+  const sel = companyId || getSelectedCompanyId();
   let batchQ = supabase.from('drug_batches').select('*').gt('qty_sisa', 0).order('tanggal_expired', { ascending: true, nullsFirst: false });
   if (sel !== 'all') batchQ = batchQ.eq('company_id', sel);
   const batches = unwrap(await batchQ);
@@ -454,7 +464,27 @@ export async function listExpiryWriteoffs() {
 }
 
 // ---------------- Visits (SOAP) ----------------
+// Sums each requested drug's available qty_sisa for this company and throws
+// up front, naming which item is short, if any line can't be fully filled —
+// called before the visit row exists or anything is dispensed, so a failed
+// save never leaves an orphan visit or a partially-deducted batch behind
+// (dispenseFefo() itself deducts+throws mid-loop on a real shortfall, which
+// is fine once we know every line can actually be filled).
+async function checkObatAvailability(companyId, obatLines) {
+  for (const line of obatLines) {
+    const { data, error } = await supabase.from('drug_batches').select('qty_sisa, drugs(nama)')
+      .eq('company_id', companyId).eq('drug_id', line.drugId).gt('qty_sisa', 0);
+    if (error) throw error;
+    const available = (data || []).reduce((s, b) => s + Number(b.qty_sisa), 0);
+    if (available < line.qty) {
+      const nama = data?.[0]?.drugs?.nama || 'Obat';
+      throw new Error(`Stok ${nama} tidak mencukupi untuk PT pasien ini (tersedia ${available}, diminta ${line.qty}). Stok yang ditampilkan di halaman lain bisa mencakup PT lain bila filter "Semua PT" aktif.`);
+    }
+  }
+}
+
 export async function createVisit(visitPayload, obatLines) {
+  if (obatLines.length) await checkObatAvailability(visitPayload.company_id, obatLines);
   const visit = await unwrap(await supabase.from('visits').insert(visitPayload).select().single());
   let biayaTotal = 0;
   for (const line of obatLines) {
@@ -845,6 +875,49 @@ export async function createDrugRequest(payload) {
   const row = await unwrap(await supabase.from('drug_requests').insert(payload).select().single());
   logActivity(payload.company_id, 'create_drug_request', 'drug_requests', row.id, { nomor: payload.nomor_permintaan });
   return row;
+}
+
+// ---------------- Factory reset (clear trial data before go-live) --------
+// Wipes every table that can only hold data someone entered while testing
+// the app — patients and their whole medical history, drug stock/batches
+// and stock movement history, requisitions, expiry write-offs, the
+// activity log, and print signature settings — while keeping user
+// accounts, companies, and the drugs/alkes master list untouched. Mirrors
+// the standalone SQL script delivered earlier, but runs through the
+// logged-in user's own RLS-scoped session instead of the DB directly, so
+// (same as everywhere else in the app) it only ever reaches whatever
+// PT(s) that account already has access to — never a way to touch another
+// PT's data. Each delete() needs at least one filter to match every row of
+// a table; most tables use a uuid `id` primary key (an impossible uuid
+// always matches), but activity_log's id is a bigint sequence (needs a
+// numeric filter) and print_signatures has no id column at all — its
+// primary key is company_id — so each table names its own filter column
+// and an always-false-match value for that column's type.
+const RESET_ORDER = [
+  ['visit_obat', 'id', '00000000-0000-0000-0000-000000000000'],
+  ['sick_notes', 'id', '00000000-0000-0000-0000-000000000000'],
+  ['referrals', 'id', '00000000-0000-0000-0000-000000000000'],
+  ['consent_forms', 'id', '00000000-0000-0000-0000-000000000000'],
+  ['visits', 'id', '00000000-0000-0000-0000-000000000000'],
+  ['queue', 'id', '00000000-0000-0000-0000-000000000000'],
+  ['patients', 'id', '00000000-0000-0000-0000-000000000000'],
+  ['expiry_writeoffs', 'id', '00000000-0000-0000-0000-000000000000'], // cascades to expiry_writeoff_items
+  ['drug_requests', 'id', '00000000-0000-0000-0000-000000000000'],
+  ['drug_receipts', 'id', '00000000-0000-0000-0000-000000000000'], // references drug_batches — must go before it
+  ['stock_transactions', 'id', '00000000-0000-0000-0000-000000000000'],
+  ['drug_batches', 'id', '00000000-0000-0000-0000-000000000000'],
+  ['activity_log', 'id', -1],
+  ['print_signatures', 'company_id', '00000000-0000-0000-0000-000000000000']
+];
+
+export async function factoryResetTrialData() {
+  for (const [table, col, neverMatches] of RESET_ORDER) {
+    const { error } = await supabase.from(table).delete().neq(col, neverMatches);
+    if (error) throw new Error(`Gagal menghapus tabel ${table}: ${error.message}`);
+  }
+  // The one record worth keeping after a reset: who did it and when — this
+  // necessarily becomes the first row in the now-empty activity_log.
+  logActivity(null, 'factory_reset', 'system', 'reset', {});
 }
 
 // ---------------- Data completeness notifications ----------------

@@ -1,4 +1,4 @@
-import { listProfiles, updateProfile, createUserAccount, listActivityLog, exportSnapshot } from '../api.js';
+import { listProfiles, updateProfile, createUserAccount, listActivityLog, exportSnapshot, factoryResetTrialData } from '../api.js';
 import { getCompanies } from '../state.js';
 import { escapeHtml, toast, openModal, confirmDialog, fmtDateTime, lockSubmit } from '../util.js';
 import { ROLE_LABEL, getProfile } from '../auth.js';
@@ -33,6 +33,18 @@ export async function renderAkun(root) {
       <h2>Backup Data</h2>
       <p class="desc" style="margin-bottom:12px">Data utama sudah tersimpan aman di Supabase dengan backup harian bawaan. Gunakan tombol ini sesekali (mis. tiap akhir bulan) untuk menyimpan salinan cadangan tambahan yang Anda kendalikan sendiri (Google Drive, email, dsb).</p>
       <button class="btn btn-outline" id="btnBackup">Unduh Backup Data (.json)</button>
+    </div>
+    <div class="panel panel-danger">
+      <h2>Zona Berbahaya — Reset Data Percobaan</h2>
+      <p class="desc" style="margin-bottom:12px">
+        Menghapus <b>semua</b> pasien &amp; rekam medis, stok/batch obat &amp; riwayat transaksinya, permintaan obat,
+        Berita Acara Kadaluwarsa, log aktivitas, dan nama tanda tangan cetak — biasanya dipakai untuk membersihkan
+        data percobaan sebelum aplikasi mulai dipakai sungguhan, atau mengulang dari nol setelah uji coba.
+        <b>Akun pengguna dan daftar master obat/alkes tidak ikut terhapus.</b>
+        Tindakan ini hanya menjangkau PT yang bisa diakses akun ini, dan <b>tidak bisa dibatalkan</b> —
+        unduh backup dulu di atas kalau ingin jaga-jaga.
+      </p>
+      <button class="btn btn-danger" id="btnFactoryReset">Reset Data Percobaan...</button>
     </div>
   `;
 
@@ -110,6 +122,55 @@ export async function renderAkun(root) {
     } finally {
       btn.disabled = false;
       btn.textContent = 'Unduh Backup Data (.json)';
+    }
+  });
+
+  root.querySelector('#btnFactoryReset').addEventListener('click', () => {
+    openFactoryResetModal(() => renderAkun(root));
+  });
+}
+
+const RESET_CONFIRM_PHRASE = 'HAPUS SEMUA DATA';
+
+function openFactoryResetModal(onDone) {
+  openModal('Reset Data Percobaan', `
+    <p class="desc" style="margin-bottom:12px">
+      Ini akan menghapus permanen semua pasien, rekam medis, stok/batch obat beserta riwayat transaksinya,
+      permintaan obat, Berita Acara Kadaluwarsa, log aktivitas, dan nama tanda tangan cetak — pada PT yang
+      bisa diakses akun ini. Akun pengguna dan daftar master obat/alkes tetap aman.
+    </p>
+    <p class="desc" style="margin-bottom:12px"><b>Tindakan ini tidak bisa dibatalkan.</b> Ketik <code>${RESET_CONFIRM_PHRASE}</code> di bawah untuk mengaktifkan tombol reset.</p>
+    <div class="field" style="margin-bottom:16px">
+      <input type="text" id="resetConfirmInput" placeholder="${RESET_CONFIRM_PHRASE}" autocomplete="off">
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button type="button" class="btn btn-outline" id="resetCancelBtn">Batal</button>
+      <button type="button" class="btn btn-danger" id="resetConfirmBtn" disabled>Hapus Semua Data Percobaan</button>
+    </div>
+  `, {
+    onMount: (body, close) => {
+      const input = body.querySelector('#resetConfirmInput');
+      const confirmBtn = body.querySelector('#resetConfirmBtn');
+      input.addEventListener('input', () => {
+        confirmBtn.disabled = input.value.trim() !== RESET_CONFIRM_PHRASE;
+      });
+      body.querySelector('#resetCancelBtn').addEventListener('click', close);
+      confirmBtn.addEventListener('click', async () => {
+        if (input.value.trim() !== RESET_CONFIRM_PHRASE) return;
+        if (!confirmDialog('Benar-benar yakin? Semua data percobaan akan dihapus permanen sekarang.')) return;
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Menghapus...';
+        try {
+          await factoryResetTrialData();
+          toast('Reset selesai — semua data percobaan sudah dihapus.');
+          close();
+          onDone();
+        } catch (err) {
+          toast(err.message || 'Gagal melakukan reset', 'err');
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = 'Hapus Semua Data Percobaan';
+        }
+      });
     }
   });
 }

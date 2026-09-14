@@ -60,7 +60,13 @@ body {
 .login-visual {
   flex: 1.15; min-width: 0; display: flex; align-items: flex-end; justify-content: center;
   padding: 48px 32px; position: relative; overflow: hidden;
-  background: linear-gradient(180deg, #dff2e6 0%, #a9d9c4 22%, #5fae86 42%, #2f7a5c 62%, #164d3c 82%, #0c3329 100%);
+  background: #0d1e2e url('../assets/login-bg.jpg') center / cover no-repeat;
+}
+.login-visual::before {
+  /* Slightly deepens the lower-left corner behind the copy text for
+     contrast, without needing any illustration or animation. */
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(200deg, rgba(0,0,0,0) 40%, rgba(5,15,22,.55) 100%);
 }
 .login-visual-copy {
   position: relative; z-index: 1; color: #fff; max-width: 420px; margin-bottom: 6%;
@@ -77,69 +83,6 @@ body {
   .login-visual { flex: 0 0 auto; min-height: 220px; padding: 24px; align-items: center; }
   .login-visual-copy { display: none; }
   .login-panel { max-width: none; flex: 1; }
-}
-/* Glowing sunrise, gently pulsing and drifting for a living-sky feel */
-.login-bg-sun {
-  position: absolute; z-index: 0; pointer-events: none;
-  top: 4%; right: 10%; width: 260px; height: 260px; border-radius: 50%;
-  background: radial-gradient(circle, rgba(255,232,170,.85), rgba(255,224,150,.35) 45%, rgba(255,224,150,0) 72%);
-  filter: blur(2px);
-  animation: sunPulse 7s ease-in-out infinite;
-}
-@keyframes sunPulse {
-  0%, 100% { transform: scale(1) translate(0, 0); opacity: .9; }
-  50% { transform: scale(1.12) translate(-6px, 8px); opacity: 1; }
-}
-/* Soft drifting clouds crossing the sky */
-.login-bg-clouds { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
-.cloud {
-  position: absolute; border-radius: 50%; background: rgba(255,255,255,.55); filter: blur(6px);
-}
-.cloud.c1 { width: 180px; height: 46px; top: 12%; left: -20%; animation: driftCloud 46s linear infinite; }
-.cloud.c2 { width: 130px; height: 34px; top: 22%; left: -30%; opacity: .7; animation: driftCloud 64s linear infinite -18s; }
-.cloud.c3 { width: 100px; height: 28px; top: 8%; left: -25%; opacity: .5; animation: driftCloud 80s linear infinite -40s; }
-@keyframes driftCloud { from { transform: translateX(0); } to { transform: translateX(140vw); } }
-/* Soft morning haze near the horizon, gently breathing */
-.login-screen::before {
-  content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0;
-  background: linear-gradient(180deg, transparent 30%, rgba(255,255,255,.22) 46%, rgba(255,255,255,.3) 54%, transparent 70%);
-  animation: hazeBreathe 9s ease-in-out infinite;
-}
-@keyframes hazeBreathe { 0%, 100% { opacity: .85; } 50% { opacity: 1; } }
-/* Animated Acacia mangium plantation (the actual HTI species these
-   companies grow), laid out as inline SVG in three parallax rows — see
-   acaciaForestSvg() in login.js. Each tree sways independently (its own
-   animation-delay) so the row reads as wind moving through the plantation
-   rather than the whole silhouette rocking as one rigid piece. */
-.login-bg-forest { position: absolute; left: 0; right: 0; bottom: 0; height: 40%; z-index: 0; pointer-events: none; width: 100%; }
-.acacia-layer[data-layer="0"] { filter: blur(1.5px); }
-.acacia-tree { animation-name: acaciaSway; animation-timing-function: ease-in-out; animation-iteration-count: infinite; }
-@keyframes acaciaSway {
-  0%, 100% { transform: rotate(-1.6deg); }
-  50% { transform: rotate(1.6deg); }
-}
-/* Sunlit floating particles (pollen/dust) drifting slowly upward */
-.login-bg-sparkle { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
-.spark {
-  position: absolute; width: 4px; height: 4px; border-radius: 50%;
-  background: rgba(255,255,255,.85); box-shadow: 0 0 6px 1px rgba(255,255,255,.6);
-  bottom: -10px; animation: sparkFloat 12s ease-in infinite;
-}
-.spark.s0 { left: 8%; animation-duration: 13s; animation-delay: 0s; }
-.spark.s1 { left: 20%; animation-duration: 16s; animation-delay: 2s; width: 3px; height: 3px; }
-.spark.s2 { left: 34%; animation-duration: 11s; animation-delay: 4s; }
-.spark.s3 { left: 50%; animation-duration: 15s; animation-delay: 1s; width: 3px; height: 3px; }
-.spark.s4 { left: 64%; animation-duration: 14s; animation-delay: 6s; }
-.spark.s5 { left: 78%; animation-duration: 12s; animation-delay: 3s; width: 3px; height: 3px; }
-.spark.s6 { left: 90%; animation-duration: 17s; animation-delay: 5s; }
-@keyframes sparkFloat {
-  0% { transform: translate(0, 0); opacity: 0; }
-  10% { opacity: .9; }
-  90% { opacity: .5; }
-  100% { transform: translate(12px, -92vh); opacity: 0; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .login-bg-sun, .cloud, .login-screen::before, .acacia-tree, .spark { animation: none !important; }
 }
 .login-card {
   position: relative; z-index: 1; width: 100%; max-width: 400px;
@@ -283,6 +226,8 @@ button, input, select, textarea { font-family: inherit; font-size: .95rem; color
 }
 .panel:hover { box-shadow: 0 10px 32px rgba(0,0,0,.14); }
 .panel h2 { font-size: 1rem; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.panel-danger { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 6%, var(--surface)); }
+.panel-danger h2 { color: var(--danger); }
 .panel h2 .muted { font-size: .78rem; color: var(--muted); font-weight: 400; }
 
 /* ---------- Forms ---------- */
