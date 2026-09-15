@@ -906,7 +906,6 @@ const RESET_ORDER = [
   ['drug_receipts', 'id', '00000000-0000-0000-0000-000000000000'], // references drug_batches — must go before it
   ['stock_transactions', 'id', '00000000-0000-0000-0000-000000000000'],
   ['drug_batches', 'id', '00000000-0000-0000-0000-000000000000'],
-  ['activity_log', 'id', -1],
   ['print_signatures', 'company_id', '00000000-0000-0000-0000-000000000000']
 ];
 
@@ -915,6 +914,13 @@ export async function factoryResetTrialData() {
     const { error } = await supabase.from(table).delete().neq(col, neverMatches);
     if (error) throw new Error(`Gagal menghapus tabel ${table}: ${error.message}`);
   }
+  // activity_log only ever has a SELECT policy (see migration_010) — a
+  // plain client-side delete() is silently blocked by RLS and removes
+  // nothing, no error, which is exactly why old log entries kept surviving
+  // a "reset". Clearing it has to go through this SECURITY DEFINER
+  // function instead (same trust model as fn_log_activity's own insert).
+  const { error: logError } = await supabase.rpc('fn_clear_activity_log');
+  if (logError) throw new Error(`Gagal menghapus log aktivitas: ${logError.message}`);
   // The one record worth keeping after a reset: who did it and when — this
   // necessarily becomes the first row in the now-empty activity_log.
   logActivity(null, 'factory_reset', 'system', 'reset', {});
